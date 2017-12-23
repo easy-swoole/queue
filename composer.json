@@ -1,0 +1,32 @@
+{
+    "name": "easySwoole/Queue",
+    "description": "A simple Queue implementation integrated into easySwoole",
+    "type": "library",
+    "keywords": [
+        "easySwoole",
+        "Queue",
+        "Redis",
+        "beanstalkd"
+    ],
+    "homepage": "https://github.com/easy-swoole/queue",
+    "minimum-stability": "stable",
+    "license": "Apache-2.0",
+    "authors": [
+        {
+            "name": "eValor",
+            "email": "mipone@foxmail.com",
+            "homepage": "http://evalor.cn",
+            "role": "Developer"
+        }
+    ],
+    "require": {
+        "PHP": ">=5.6.0",
+        "pda/pheanstalk": "^3.1",
+        "predis/predis": "^1.1"
+    },
+    "autoload": {
+        "psr-4": {
+            "easySwoole\\Queue\\": "src/"
+        }
+    }
+}
