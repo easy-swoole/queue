@@ -168,7 +168,7 @@ function onWorkerStart(\swoole_server $server, $workerId)
     // 获得最大TaskWorker数量
     $TaskWorkerNum = Config::getInstance()->getConf('SERVER.CONFIG.task_worker_num');
     if ($workerId == 0) {
-    
+
         // 启动定时器每1秒投递一个Listener
         Timer::loop(1000, function () use ($TaskWorkerNum) {
 
@@ -176,41 +176,40 @@ function onWorkerStart(\swoole_server $server, $workerId)
 
             // 请勿使得所有Worker都在繁忙状态 危险操作
             if ($share->get('TASK_RUNNING_NUM') < $TaskWorkerNum - 1) {
-            
+
                 AsyncTaskManager::getInstance()->add(
-                function () use ($share) {
-                
-                    // Worker计数器自增
-                    $share->startTransaction();
-                    $share->set('TASK_RUNNING_NUM', $share->get(WorkConsts::TASK_RUNNING_NUM) + 1);
-                    $share->commit();
-                    
-                    // 启动一个任务监听
-                    $listener = new Listener(3,5,3);
-                    $listener->listen('QueueName,OtherName', 3, 5);
-                    
-                    while (1) {
-                    	try {
-	                    	$data = $listener->listen('QueueName');
-								if (!$data->Job()) break;
-							} catch (\Exception $e) {
-								echo 'onWorkerStart Closure Exception: ' . $e->getMessage() . PHP_EOL;
-								break;
-							}
-                    }
-                    
-                    return true;  // 切记任务结束后一定要return
-                    
-                }, 
-                AsyncTaskManager::TASK_DISPATCHER_TYPE_RANDOM,
-                function () use ($share) {
-                    // Worker计数器自减
-                    $share->startTransaction();
-                    $share->set('TASK_RUNNING_NUM', $share->get(WorkConsts::TASK_RUNNING_NUM) - 1);
-                    $share->commit();
-                });
+                    function () use ($share) {
+
+                        // Worker计数器自增
+                        $share->startTransaction();
+                        $share->set('TASK_RUNNING_NUM', $share->get(WorkConsts::TASK_RUNNING_NUM) + 1);
+                        $share->commit();
+
+                        // 启动一个任务监听
+                        $listener = new Listener(3, 5, 3);
+                        $listener->listen('QueueName,OtherName', 3, 5);
+
+                        while (1) {
+                            try {
+                                $data = $listener->listen('QueueName');
+                                if (!$data->Job()) break;
+                            } catch (\Exception $e) {
+                                echo 'onWorkerStart Closure Exception: ' . $e->getMessage() . PHP_EOL;
+                                break;
+                            }
+                        }
+
+                        return true;  // 切记任务结束后一定要return
+
+                    },
+                    AsyncTaskManager::TASK_DISPATCHER_TYPE_RANDOM,
+                    function () use ($share) {
+                        // Worker计数器自减
+                        $share->startTransaction();
+                        $share->set('TASK_RUNNING_NUM', $share->get(WorkConsts::TASK_RUNNING_NUM) - 1);
+                        $share->commit();
+                    });
             }
         });
     }
-}
-```
+}```
