@@ -116,26 +116,6 @@ class Redis extends Connector
     }
 
     /**
-     * 执行Redis事务
-     * @param \Closure $closure
-     * @author : evalor <master@evalor.cn>
-     */
-    protected function transaction(\Closure $closure)
-    {
-        $this->instance->multi();
-
-        try {
-            call_user_func($closure);
-            if (!$this->instance->exec()) {
-                $this->instance->discard();
-            }
-        } catch (\Exception $e) {
-            $this->instance->discard();
-        }
-
-    }
-
-    /**
      * 移动延迟任务
      * @param string $from 移出的集合
      * @param string $to 移入的集合
@@ -147,7 +127,7 @@ class Redis extends Connector
         $this->instance->watch($from);
         $jobs = $this->getExpiredJobs($from, $time = time());
         if (count($jobs) > 0) {
-            $this->transaction(function () use ($from, $to, $time, $jobs, $attempt) {
+            $this->instance->transaction(function () use ($from, $to, $time, $jobs, $attempt) {
                 $this->removeExpiredJobs($from, $time);
                 $this->pushExpiredJobsOntoNewQueue($to, $jobs, $attempt);
             });
