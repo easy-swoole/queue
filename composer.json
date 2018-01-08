@@ -1,5 +1,5 @@
 {
-    "name": "easySwoole/Queue",
+    "name": "easyswoole/queue",
     "description": "A simple Queue implementation integrated into easySwoole",
     "type": "library",
     "keywords": [
