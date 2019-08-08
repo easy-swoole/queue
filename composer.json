@@ -15,6 +15,7 @@
         }
     },
     "require": {
+        "ext-swoole": ">=4.4.0",
         "easyswoole/component": "^1.6",
         "easyswoole/spl": "^1.2"
     },
