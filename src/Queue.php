@@ -1,28 +1,39 @@
 <?php
 
 
-namespace easySwoole\Queue;
+namespace EasySwoole\Queue;
 
+
+use Swoole\Atomic\Long;
 
 class Queue
 {
-    public function push()
-    {
+    private $driver;
+    private $atomic;
 
+    function __construct(QueueDriverInterface $driver)
+    {
+        $this->driver = $driver;
+        $this->atomic = new Long(0);
     }
 
-    public function pop()
+    function consumer():Consumer
     {
-
+        return new Consumer($this->driver);
     }
 
-    public function later()
+    function producer():Producer
     {
-
+        return new Producer($this->driver,$this->atomic);
     }
 
-    public function size()
+    function size():?int
     {
+        return $this->driver->size();
+    }
 
+    function currentJobId():int
+    {
+        return $this->atomic->get();
     }
 }
