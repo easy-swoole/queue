@@ -17,6 +17,12 @@ class Queue
         $this->atomic = new Long(0);
     }
 
+
+    function queueDriver():QueueDriverInterface
+    {
+        return $this->driver;
+    }
+
     function consumer():Consumer
     {
         return new Consumer($this->driver);
@@ -35,5 +41,11 @@ class Queue
     function currentJobId():int
     {
         return $this->atomic->get();
+    }
+
+    function setJobStartId(int $id):Queue
+    {
+        $this->atomic->set($id);
+        return $this;
     }
 }
