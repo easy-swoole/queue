@@ -1,29 +1,32 @@
 # Queue
-
 ```php
+use EasySwoole\Redis\Config\RedisConfig;
+use EasySwoole\RedisPool\RedisPool;
+use EasySwoole\Queue\Driver\Redis;
+use EasySwoole\Queue\Queue;
+use EasySwoole\Queue\Job;
 
-go(function (){
-   \EasySwoole\RedisPool\Redis::getInstance()->register('queue',new \EasySwoole\RedisPool\Config());
-    $driver = new \EasySwoole\Queue\Driver\Redis('queue','queue');
-    $queue = new EasySwoole\Queue\Queue($driver);
+$config = new RedisConfig([
+    'host'=>'127.0.0.1'
+]);
+$redis = new RedisPool($config);
 
+$driver = new Redis($redis);
+$queue = new Queue($driver);
 
-    go(function ()use($queue){
-        while (1){
-            $job = new \EasySwoole\Queue\Job();
-            $job->setJobData(time());
-            $id = $queue->producer()->push($job);
-            var_dump('job create for Id :'.$id);
-            \co::sleep(3);
-        }
-    });
-
-    go(function ()use($queue){
-        $queue->consumer()->listen(function (\EasySwoole\Queue\Job $job){
-            var_dump($job->toArray());
-        });
-    });
-
+go(function ()use($queue){
+    while (1){
+        $job = new Job();
+        $job->setJobData(time());
+        $id = $queue->producer()->push($job);
+        var_dump('job create for Id :'.$id);
+        \co::sleep(3);
+    }
 });
 
+go(function ()use($queue){
+    $queue->consumer()->listen(function (Job $job){
+        var_dump($job->toArray());
+    });
+});
 ```
