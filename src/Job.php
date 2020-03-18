@@ -4,12 +4,11 @@
 namespace EasySwoole\Queue;
 
 
-use EasySwoole\Spl\SplBean;
-
-class Job extends SplBean
+class Job
 {
     protected $jobData;
     protected $jobId;
+    protected $nodeId;
 
     /**
      * @return mixed
@@ -41,5 +40,21 @@ class Job extends SplBean
     public function setJobId($jobId): void
     {
         $this->jobId = $jobId;
+    }
+
+    /**
+     * @return mixed
+     */
+    public function getNodeId():?string
+    {
+        return $this->nodeId;
+    }
+
+    /**
+     * @param mixed $nodeId
+     */
+    public function setNodeId(?string $nodeId): void
+    {
+        $this->nodeId = $nodeId;
     }
 }
