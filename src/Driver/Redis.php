@@ -14,7 +14,7 @@ class Redis implements QueueDriverInterface
 
     protected $pool;
     protected $queueName;
-    public function __construct(RedisPool $pool,string $queueName = 'EasySwoole')
+    public function __construct(RedisPool $pool,string $queueName = 'easy_queue')
     {
         $this->pool = $pool;
         $this->queueName = $queueName;
@@ -22,7 +22,7 @@ class Redis implements QueueDriverInterface
 
     public function push(Job $job): bool
     {
-        $data = $job->__toString();
+        $data = serialize($job);
         return $this->pool->invoke(function (Connection $connection)use($data){
             return $connection->lPush($this->queueName,$data);
         });
@@ -31,12 +31,11 @@ class Redis implements QueueDriverInterface
     public function pop(float $timeout = 3.0): ?Job
     {
         return $this->pool->invoke(function (Connection $connection){
-            $data =  json_decode($connection->rPop($this->queueName),true);
-            if(is_array($data)){
-                return new Job($data);
-            }else{
-                return null;
+            $data =  $connection->rPop($this->queueName);
+            if($data){
+                return unserialize($data);
             }
+            return null;
         });
     }
 

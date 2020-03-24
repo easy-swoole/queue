@@ -21,20 +21,26 @@ class Consumer
         return  $this->driver->pop($timeout);
     }
 
-    function listen(callable $call, float $breakTime = 0.01,float $waitTime = 3.0, int $maxCurrency=128)
+    function listen(callable $call, float $breakTime = 0.01,float $waitTime = 0.1, int $maxCurrency=128)
     {
         $this->enableListen = true;
         $running = 0;
         while ($this->enableListen){
             if ($running >= $maxCurrency) {
+                Coroutine::sleep($breakTime);
                 continue;
             }
             $job = $this->driver->pop($waitTime);
             if($job){
                 ++$running;
                 Coroutine::create(function () use(&$running, $call, $job){
-                    call_user_func($call,$job);
-                    --$running;
+                    try{
+                        call_user_func($call,$job);
+                    }catch (\Throwable $throwable){
+                        throw $throwable;
+                    }finally{
+                        --$running;
+                    }
                 });
             }else{
                 Coroutine::sleep($breakTime);
