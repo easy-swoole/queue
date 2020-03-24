@@ -32,7 +32,7 @@ class Queue
 
     function producer():Producer
     {
-        return new Producer($this->driver,$this->atomic);
+        return new Producer($this->driver, $this->atomic, $this->nodeId);
     }
 
     function size():?int
