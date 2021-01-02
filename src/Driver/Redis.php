@@ -7,14 +7,14 @@ namespace EasySwoole\Queue\Driver;
 use EasySwoole\Queue\Job;
 use EasySwoole\Queue\QueueDriverInterface;
 use EasySwoole\Redis\Redis as Connection;
-use EasySwoole\RedisPool\RedisPool;
+use EasySwoole\RedisPool\Pool;
 
 class Redis implements QueueDriverInterface
 {
 
     protected $pool;
     protected $queueName;
-    public function __construct(RedisPool $pool,string $queueName = 'easy_queue')
+    public function __construct(Pool $pool,string $queueName = 'easy_queue')
     {
         $this->pool = $pool;
         $this->queueName = $queueName;
