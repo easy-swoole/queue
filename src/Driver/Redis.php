@@ -28,7 +28,7 @@ class Redis implements QueueDriverInterface
         });
     }
 
-    public function pop(float $timeout = 3.0): ?Job
+    public function pop(float $timeout = 3.0, array $params = []): ?Job
     {
         return $this->pool->invoke(function (Connection $connection){
             $data =  $connection->rPop($this->queueName);
