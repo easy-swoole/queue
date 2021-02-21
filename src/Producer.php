@@ -4,34 +4,25 @@
 namespace EasySwoole\Queue;
 
 
-use Swoole\Atomic\Long;
+use EasySwoole\Utility\Random;
 
 class Producer
 {
-    private $atomic;
     private $driver;
     private $nodeId;
 
-    function __construct(QueueDriverInterface $driver,Long $atomic,?string $nodeId = null)
+    function __construct(QueueDriverInterface $driver,string $nodeId)
     {
-        $this->atomic = $atomic;
         $this->driver = $driver;
         $this->nodeId = $nodeId;
     }
 
-    function push(Job $job,bool $init = true)
+    function push(Job $job):bool
     {
-        $id = $this->atomic->add(1);
-        if($id > 0){
-            if($init){
-                $job->setJobId($id);
-                $job->setNodeId($this->nodeId);
-            }
-            $ret = $this->driver->push($job);
-            if($ret){
-                return $id;
-            }
+        if(empty($job->getJobId())){
+            $job->setJobId(substr(md5(Random::character(8).$this->nodeId.microtime(true)),8,16));
         }
-        return 0;
+        $job->setNodeId($this->nodeId);
+        return $this->driver->push($job);
     }
 }

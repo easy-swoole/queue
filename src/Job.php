@@ -9,6 +9,7 @@ class Job
     protected $jobData;
     protected $jobId;
     protected $nodeId;
+    protected $delayTime = 0;
 
     /**
      * @return mixed
@@ -56,5 +57,21 @@ class Job
     public function setNodeId(?string $nodeId): void
     {
         $this->nodeId = $nodeId;
+    }
+
+    /**
+     * @return int
+     */
+    public function getDelayTime(): int
+    {
+        return $this->delayTime;
+    }
+
+    /**
+     * @param int $delayTime
+     */
+    public function setDelayTime(int $delayTime): void
+    {
+        $this->delayTime = $delayTime;
     }
 }
