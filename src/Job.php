@@ -10,6 +10,8 @@ class Job
     protected $jobId;
     protected $nodeId;
     protected $delayTime = 0;
+    protected $retryTimes = 0;
+    protected $runTimes = 0;
 
     /**
      * @return mixed
@@ -73,5 +75,37 @@ class Job
     public function setDelayTime(int $delayTime): void
     {
         $this->delayTime = $delayTime;
+    }
+
+    /**
+     * @return int
+     */
+    public function getRetryTimes(): int
+    {
+        return $this->retryTimes;
+    }
+
+    /**
+     * @param int $retryTimes
+     */
+    public function setRetryTimes(int $retryTimes): void
+    {
+        $this->retryTimes = $retryTimes;
+    }
+
+    /**
+     * @return int
+     */
+    public function getRunTimes(): int
+    {
+        return $this->runTimes;
+    }
+
+    /**
+     * @param int $runTimes
+     */
+    public function setRunTimes(int $runTimes): void
+    {
+        $this->runTimes = $runTimes;
     }
 }
