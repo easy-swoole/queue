@@ -10,7 +10,7 @@ composer require easyswoole/queue 2.1.x
 
 `easyswoole/redis-pool:~2.2.0`
 
-## 使用
+## 普通队列 
 
 ```php
 <?php
@@ -73,6 +73,59 @@ go(function (){
             echo "job2 data:".$job->getJobData().PHP_EOL;
         });
     });
+});
+
+```
+
+
+## 延迟队列
+ 
+```php
+<?php
+/**
+ * Created by PhpStorm.
+ * User: Tioncico
+ * Date: 2019/10/18 0018
+ * Time: 9:54
+ */
+
+include "./vendor/autoload.php";
+use EasySwoole\Queue\Driver\DelayQueue;
+
+go(function (){
+    //queue组件会自动强制进行序列化
+    \EasySwoole\RedisPool\RedisPool::getInstance()->register(new \EasySwoole\Redis\Config\RedisConfig(
+        [
+            'host'      => '127.0.0.1',
+            'port'      => '6379',
+            'auth'      => 'easyswoole',
+        ]
+    ), 'queue');
+    $redisPool = \EasySwoole\RedisPool\RedisPool::getInstance()->getPool('queue');
+
+    // 注册延迟队列驱动
+    $driver = new \EasySwoole\Queue\Driver\DelayQueue($redisPool,'queue');
+    $queue = new EasySwoole\Queue\Queue($driver);
+
+    // 生产者
+    go(function ()use($queue){
+        while (1){
+            $job = new \EasySwoole\Queue\Job();
+            $data = "1:".rand(1,99);
+            $job->setJobData($data);
+            $id = $queue->producer()->push($job);
+            echo ('create1 data :'.$data.PHP_EOL);
+            \co::sleep(3);
+        }
+    });
+    
+    // 消费者
+    go(function ()use($queue){
+        $queue->consumer()->listen(function (\EasySwoole\Queue\Job $job){
+            echo "job1 data:".$job->getJobData().PHP_EOL;
+        }, 0.01, 0.01, 128, ['delay_time'=>3]); // 延迟时间3s
+    });
+
 });
 
 ```
