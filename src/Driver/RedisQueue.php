@@ -13,8 +13,9 @@ class RedisQueue implements QueueDriverInterface
 {
     protected $pool;
     protected $queueName;
+    protected $lastCheckDelay = null;
 
-    public function __construct(RedisConfig $config,string $queueName = 'easy_queue')
+    public function __construct(RedisConfig $config,string $queueName = 'es_q')
     {
         $this->pool = new Pool($config);
         $this->queueName = $queueName;
@@ -22,16 +23,33 @@ class RedisQueue implements QueueDriverInterface
 
     public function push(Job $job): bool
     {
-        // TODO: Implement push() method.
+        if($job->getDelayTime() > 0){
+            return $this->pool->invoke(function ($redis)use($job){
+                /** @var $redis \EasySwoole\Redis\Redis */
+                return $redis->zAdd("{$this->queueName}_d",time() + $job->getDelayTime(),serialize($job));
+            },1);
+        }else{
+            return $this->pool->invoke(function($redis)use($job){
+                /** @var $redis \EasySwoole\Redis\Redis */
+                return $redis->rPush($this->queueName,serialize($job));
+            },1);
+        }
     }
 
     public function pop(float $timeout = 3.0, array $params = []): ?Job
     {
-        // TODO: Implement pop() method.
+        //检查当前秒数的延迟任务是否存在未执行任务。
+        if($this->lastCheckDelay != time()){
+            $this->lastCheckDelay = time();
+            //取出需要执行的，并放置到队列前面。
+        }
+
     }
 
-    public function size(): ?int
+    public function info(): ?array
     {
-        // TODO: Implement size() method.
+        return [
+
+        ];
     }
 }

@@ -10,5 +10,5 @@ interface QueueDriverInterface
 
     public function pop(float $timeout = 3.0, array $params = []): ?Job;
 
-    public function size(): ?int;
+    public function info(): ?array;
 }
