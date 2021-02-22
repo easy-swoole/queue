@@ -32,9 +32,9 @@ class Queue
         return new Producer($this->driver, $this->nodeId);
     }
 
-    function size():?int
+    function info():?array
     {
-        return $this->driver->size();
+        return $this->driver->info();
     }
 
     /**
