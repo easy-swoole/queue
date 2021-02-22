@@ -43,22 +43,25 @@ class RedisQueue implements QueueDriverInterface
         //检查当前秒数的延迟任务是否存在未执行任务。
         if($this->lastCheckDelay != time()){
             $this->lastCheckDelay = time();
-            $this->pool->invoke(function ($redis){
-                /** @var $redis Redis */
-                $list = $redis->zCount("{$this->queueName}_d",0,$this->lastCheckDelay);
-                if($list > 0){
-                    $jobs = $redis->zPopmin("{$this->queueName}_d",$list);
-                    if(is_array($jobs)){
-                        foreach ($jobs as $tempJob => $time){
-                            if($time > $this->lastCheckDelay){
-                                $redis->zAdd("{$this->queueName}_d",$time,$tempJob);
-                            }else{
-                                $redis->lPush($this->queueName,$tempJob);
+            Coroutine::create(function ()use($timeout){
+                $this->pool->invoke(function ($redis){
+                    /** @var $redis Redis */
+                    $list = $redis->zCount("{$this->queueName}_d",0,$this->lastCheckDelay);
+                    if($list > 0){
+                        $jobs = $redis->zPopmin("{$this->queueName}_d",$list);
+                        if(is_array($jobs)){
+                            foreach ($jobs as $tempJob => $time){
+                                if($time > $this->lastCheckDelay){
+                                    $redis->zAdd("{$this->queueName}_d",$time,$tempJob);
+                                }else{
+                                    //插入到队列头
+                                    $redis->lPush($this->queueName,$tempJob);
+                                }
                             }
                         }
                     }
-                }
-            },$timeout);
+                },$timeout);
+            });
         }
         $job = $this->pool->invoke(function ($redis){
             /** @var $redis Redis */
