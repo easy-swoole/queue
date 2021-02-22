@@ -75,6 +75,9 @@ class Job
      */
     public function setDelayTime(int $delayTime): void
     {
+        if($delayTime <= 0){
+            $delayTime = 3;
+        }
         $this->delayTime = $delayTime;
     }
 
