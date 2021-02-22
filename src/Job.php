@@ -12,6 +12,7 @@ class Job
     protected $delayTime = 0;
     protected $retryTimes = 0;
     protected $runTimes = 0;
+    protected $waitConfirmTime = 3;
 
     /**
      * @return mixed
@@ -74,6 +75,9 @@ class Job
      */
     public function setDelayTime(int $delayTime): void
     {
+        if($delayTime <= 0){
+            $delayTime = 3;
+        }
         $this->delayTime = $delayTime;
     }
 
@@ -107,5 +111,21 @@ class Job
     public function setRunTimes(int $runTimes): void
     {
         $this->runTimes = $runTimes;
+    }
+
+    /**
+     * @return int
+     */
+    public function getWaitConfirmTime(): int
+    {
+        return $this->waitConfirmTime;
+    }
+
+    /**
+     * @param int $waitConfirmTime
+     */
+    public function setWaitConfirmTime(int $waitConfirmTime): void
+    {
+        $this->waitConfirmTime = $waitConfirmTime;
     }
 }
