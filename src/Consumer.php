@@ -34,6 +34,11 @@ class Consumer
         }
     }
 
+    function confirm(Job $job):bool
+    {
+        return $this->driver->confirm($job);
+    }
+
     function stopListen(): Consumer
     {
         $this->enableListen = false;

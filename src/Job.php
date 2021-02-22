@@ -12,7 +12,7 @@ class Job
     protected $delayTime = 0;
     protected $retryTimes = 0;
     protected $runTimes = 0;
-    protected $confirmTime = 3;
+    protected $waitConfirmTime = 3;
 
     /**
      * @return mixed
@@ -116,16 +116,16 @@ class Job
     /**
      * @return int
      */
-    public function getConfirmTime(): int
+    public function getWaitConfirmTime(): int
     {
-        return $this->confirmTime;
+        return $this->waitConfirmTime;
     }
 
     /**
-     * @param int $confirmTime
+     * @param int $waitConfirmTime
      */
-    public function setConfirmTime(int $confirmTime): void
+    public function setWaitConfirmTime(int $waitConfirmTime): void
     {
-        $this->confirmTime = $confirmTime;
+        $this->waitConfirmTime = $waitConfirmTime;
     }
 }

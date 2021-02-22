@@ -73,7 +73,7 @@ class RedisQueue implements QueueDriverInterface
         //需要确认的任务
         if($job->getRetryTimes() != 0){
             //到达最大的执行次数
-            if($job->getRunTimes() > $job->getRetryTimes()){
+            if($job->getRunTimes() >= $job->getRetryTimes()){
                 $this->pool->invoke(function ($redis)use($job){
                     /** @var $redis Redis */
                     $redis->hDel("{$this->queueName}_c",$job->getJobId());
@@ -94,7 +94,7 @@ class RedisQueue implements QueueDriverInterface
             //丢到延迟队列中。
             $temp = clone $job;
             $temp->setRunTimes($temp->getRunTimes() + 1);
-            $temp->setDelayTime($temp->getConfirmTime());
+            $temp->setDelayTime($temp->getWaitConfirmTime());
             $this->push($temp);
             //标记为待确认。
             $this->pool->invoke(function ($redis)use($temp){
