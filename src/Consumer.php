@@ -21,15 +21,24 @@ class Consumer
         return $this->driver->pop($timeout, $params);
     }
 
-    function listen(callable $call,array $params = [])
+    function listen(callable $call,array $params = [],?callable $onException = null)
     {
         $this->enableListen = true;
         while ($this->enableListen) {
-            $job = $this->driver->pop(0.1, $params);
-            if ($job) {
-                call_user_func($call, $job);
-            } else {
-                Coroutine::sleep(0.001);
+            $job = null;
+            try{
+                $job = $this->driver->pop(0.1, $params);
+                if ($job) {
+                    call_user_func($call, $job);
+                } else {
+                    Coroutine::sleep(0.001);
+                }
+            }catch (\Throwable $throwable){
+                if($onException){
+                    call_user_func($onException,$throwable,$job);
+                }else{
+                    throw $throwable;
+                }
             }
         }
     }
