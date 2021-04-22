@@ -129,7 +129,7 @@ class RedisQueue implements QueueDriverInterface
             /** @var $redis Redis */
             return [
                 'runningQueue'=>$redis->lLen($this->queueName),
-                'delayQueue'=>$redis->zCard("{$this->queueName}_c")
+                'delayQueue'=>$redis->zCard("{$this->queueName}_d")
             ];
         });
     }
