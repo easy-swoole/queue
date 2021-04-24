@@ -133,4 +133,15 @@ class RedisQueue implements QueueDriverInterface
             ];
         });
     }
+
+    public function flush():bool
+    {
+        $this->pool->invoke(function ($redis){
+            /** @var $redis Redis */
+            $redis->del("{$this->queueName}_c");
+            $redis->del("{$this->queueName}_d");
+            $redis->del("{$this->queueName}");
+        });
+        return true;
+    }
 }
