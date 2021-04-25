@@ -49,3 +49,21 @@ $queue->producer()->push($job);//投递任务
 //确认一个任务
 $queue->consumer()->confirm($job);
 ```
+
+## 消费者控制
+
+当队列未`pop`到`job`时：
+
+```php
+/** @var \EasySwoole\Queue\Queue $queue */
+$queue->consumer()->setOnBreak(function(\EasySwoole\Queue\Consumer $consumer) {
+     // todo 
+ })->listen(function (\EasySwoole\Queue\Job $job){ });
+```
+
+设置`breakTime`：
+
+```php
+/** @var \EasySwoole\Queue\Queue $queue */
+$queue->consumer()->setBreakTime(0.1);
+```
