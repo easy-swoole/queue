@@ -63,8 +63,11 @@ class RedisQueue implements QueueDriverInterface
                 },$timeout);
             });
         }
-        $job = $this->pool->invoke(function ($redis){
+        $job = $this->pool->invoke(function ($redis)use($params){
             /** @var $redis Redis */
+            if(isset($params['waitTime'])){
+                return $redis->bLPop($this->queueName,$params['waitTime']);
+            }
             return $redis->lPop($this->queueName);
         },$timeout);
         if($job){
