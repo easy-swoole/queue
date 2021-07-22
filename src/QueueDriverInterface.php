@@ -13,4 +13,6 @@ interface QueueDriverInterface
     public function info(): ?array;
 
     public function confirm(Job $job,float $timeout = 3.0): bool;
+
+    public function flush():bool;
 }
