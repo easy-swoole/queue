@@ -48,9 +48,14 @@ class RedisPool extends AbstractPool
      */
     protected function itemIntervalCheck($item): bool
     {
+        if(!isset($item->__lastPingTime)){
+            $item->__lastPingTime = 0;
+        }
         if(time() - $item->__lastPingTime > 10){
             try{
-                return $item->ping();
+                $ret = $item->ping();
+                $item->__lastPingTime = time();
+                return $ret;
             }catch (\Throwable $throwable){
                 //异常说明该链接出错了，return false 进行回收
                 return false;
