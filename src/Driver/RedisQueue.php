@@ -4,12 +4,13 @@
 namespace EasySwoole\Queue\Driver;
 
 
+use EasySwoole\Pool\MagicPool;
 use EasySwoole\Queue\Job;
 use EasySwoole\Queue\QueueDriverInterface;
-use EasySwoole\Redis\Config\RedisConfig;
+use EasySwoole\Redis\Config;
 use EasySwoole\Redis\Redis;
-use EasySwoole\RedisPool\Pool;
 use Swoole\Coroutine;
+use EasySwoole\Pool\Config as PoolConfig;
 
 class RedisQueue implements QueueDriverInterface
 {
@@ -17,10 +18,19 @@ class RedisQueue implements QueueDriverInterface
     protected $queueName;
     protected $lastCheckDelay = null;
 
-    public function __construct(RedisConfig $config,string $queueName = 'es_q')
+    public function __construct(Config $config,string $queueName = 'es_q')
     {
-        $this->pool = new Pool($config);
+        $this->pool = new MagicPool(function ()use($config){
+            $redis = new Redis($config);
+            $redis->connect();
+            return $redis;
+        });
         $this->queueName = $queueName;
+    }
+
+    public function getPoolConfig(): PoolConfig
+    {
+        return $this->pool->getConfig();
     }
 
     public function push(Job $job,float $timeout = 3.0): bool

@@ -16,8 +16,8 @@
     },
     "require": {
         "ext-swoole": ">=4.4.0",
-        "easyswoole/component": "^2.0",
-        "easyswoole/redis-pool": "^2.2"
+        "easyswoole/redis": "^2.0",
+        "easyswoole/pool": "^1.2"
     },
     "require-dev": {
         "easyswoole/swoole-ide-helper": "^1.0"
