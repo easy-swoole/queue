@@ -3,6 +3,7 @@
 namespace EasySwoole\Queue\Driver\Pool;
 
 use EasySwoole\Pool\AbstractPool;
+use EasySwoole\Redis\ClusterConfig;
 use EasySwoole\Redis\Config;
 use EasySwoole\Redis\Redis;
 use EasySwoole\Redis\RedisCluster;
@@ -13,7 +14,7 @@ class RedisPool extends AbstractPool
     {
         /** @var Config $config */
         $config = $this->getConfig()->getExtraConf();
-        if($config instanceof RedisCluster){
+        if($config instanceof ClusterConfig){
             $info = new RedisCluster($config);
             $info->connect();
             return $info;
