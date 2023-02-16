@@ -3,20 +3,27 @@
 ## 安装
 
 ```bash
-composer require easyswoole/queue 3.x
+composer require easyswoole/queue 
 ```
 
 ## 使用
 默认自带的队列驱动为Redis队列。
 ### 创建队列
-```
-use EasySwoole\Queue\Driver\RedisQueue;
-use EasySwoole\Queue\Job;
-use EasySwoole\Queue\Queue;
-use EasySwoole\Redis\Config\RedisConfig;
+```php
 
-$config = new RedisConfig();
-$queue = new Queue(new RedisQueue($config));
+use EasySwoole\Queue\Driver\RedisQueue;
+use EasySwoole\Queue\Queue;
+use EasySwoole\Redis\Config;
+
+$config = new Config([
+    'host'=>"",
+    'port'=>"",
+    'auth'=>""
+]);
+
+$driver = new RedisQueue($config);
+$queue = new Queue($driver);
+
 ```
 ### 普通生产
 ```
@@ -32,6 +39,48 @@ $queue->consumer()->listen(function (Job $job){
     var_dump($job);
 });
 ```
+
+## CLI 单独使用
+```php
+
+use EasySwoole\Queue\Driver\RedisQueue;
+use EasySwoole\Queue\Job;
+use EasySwoole\Queue\Queue;
+use EasySwoole\Redis\Config;
+use Swoole\Coroutine;
+use Swoole\Coroutine\Scheduler;
+
+require "vendor/autoload.php";
+
+$sc = new Scheduler();
+$sc->add(function (){
+    $config = new Config([
+        'host'=>"",
+        'port'=>"",
+        'auth'=>""
+    ]);
+
+    $driver = new RedisQueue($config);
+    $queue = new Queue($driver);
+
+    Coroutine::create(function ()use($queue){
+        while (1){
+            Coroutine::sleep(3);
+            $job = new Job();
+            $job->setJobData("job create at ".time());
+            $queue->producer()->push($job);
+        }
+    });
+
+    $queue->consumer()->listen(function (Job $job){
+        var_dump($job->getJobData());
+    });
+
+});
+
+$sc->start();
+```
+
 ## 延迟任务
 ```
 $job = new Job();
