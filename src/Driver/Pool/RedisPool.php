@@ -15,13 +15,15 @@ class RedisPool extends AbstractPool
         /** @var Config $config */
         $config = $this->getConfig()->getExtraConf();
         if($config instanceof ClusterConfig){
-            $info = new RedisCluster($config);
-            $info->connect();
-            return $info;
+            $item = new RedisCluster($config);
+            $item->connect();
+            $item->__lastPingTime = 0;
+            return $item;
         }else{
-            $info = new Redis($config);
-            $info->connect();
-            return $info;
+            $item = new Redis($config);
+            $item->connect();
+            $item->__lastPingTime = 0;
+            return $item;
         }
     }
 
@@ -48,9 +50,6 @@ class RedisPool extends AbstractPool
      */
     protected function itemIntervalCheck($item): bool
     {
-        if(!isset($item->__lastPingTime)){
-            $item->__lastPingTime = 0;
-        }
         if(time() - $item->__lastPingTime > 10){
             try{
                 $ret = $item->ping();
