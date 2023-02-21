@@ -46,7 +46,7 @@ class RedisQueue implements QueueDriverInterface
         }
     }
 
-    public function pop(float $timeout = 3.0, array $params = []): ?Job
+    public function pop(float $timeout = 3.0, ?array $params = null): ?Job
     {
         //检查当前秒数的延迟任务是否存在未执行任务。
         if($this->lastCheckDelay != time()){
