@@ -24,7 +24,7 @@ class Consumer
         return $this->driver->pop($timeout, $params);
     }
 
-    function listen(callable $call,array $params = [],?callable $onException = null)
+    function listen(callable $call,?array $params = null,?callable $onException = null)
     {
         $this->enableListen = true;
         while ($this->enableListen) {

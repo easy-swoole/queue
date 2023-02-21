@@ -8,7 +8,7 @@ interface QueueDriverInterface
 {
     public function push(Job $job,float $timeout = 3.0): bool;
 
-    public function pop(float $timeout = 3.0, array $params = []): ?Job;
+    public function pop(float $timeout = 3.0, ?array $params = null): ?Job;
 
     public function info(): ?array;
 
