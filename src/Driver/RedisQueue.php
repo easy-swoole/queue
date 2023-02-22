@@ -15,20 +15,33 @@ use EasySwoole\Pool\Config as PoolConfig;
 class RedisQueue implements QueueDriverInterface
 {
     protected $pool;
-    protected $queueName;
+    protected $queueName = 'es_q';
     protected $lastCheckDelay = null;
 
-    public function __construct(Config $config,string $queueName = 'es_q')
+    protected $config;
+
+    protected $hasInit = false;
+
+    public function __construct(Config $config)
     {
-        $poolConfig = new PoolConfig();
-        $poolConfig->setExtraConf($config);
-        $this->pool = new RedisPool($poolConfig);
-        $this->queueName = $queueName;
+        $this->config = new PoolConfig();
+        $this->config->setExtraConf($config);
     }
+
+    public function init(string $topicName, ?string $nodeId): bool
+    {
+        if(!$this->hasInit){
+            $this->hasInit = true;
+        }
+        $this->queueName = $topicName;
+        $this->pool = new RedisPool($this->config);
+        return true;
+    }
+
 
     public function getPoolConfig(): PoolConfig
     {
-        return $this->pool->getConfig();
+        return $this->config;
     }
 
     public function push(Job $job,float $timeout = 3.0): bool
@@ -154,5 +167,10 @@ class RedisQueue implements QueueDriverInterface
             $redis->del("{$this->queueName}");
         });
         return true;
+    }
+
+    public function __clone()
+    {
+
     }
 }

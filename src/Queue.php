@@ -4,6 +4,7 @@
 namespace EasySwoole\Queue;
 
 
+use EasySwoole\Queue\Exception\Exception;
 use EasySwoole\Utility\Random;
 
 class Queue
@@ -11,8 +12,8 @@ class Queue
     private $driver;
     private $nodeId;
 
-    private $consumer;
-    private $producer;
+    private $consumer = [];
+    private $producer = [];
 
     function __construct(QueueDriverInterface $driver)
     {
@@ -25,26 +26,30 @@ class Queue
         return $this->driver;
     }
 
-    function consumer(bool $renew = false):Consumer
+    function consumer(string $topic,bool $renew = false):Consumer
     {
-        if(!$renew){
-            $this->consumer = new Consumer($this->driver);
+        if((!$renew) || !isset($this->consumer[$topic])){
+            $driver = clone $this->driver;
+            if(!$driver->init($topic,$this->nodeId)){
+                throw new Exception("init queue topic:{$topic} driver fail");
+            }
+            $temp = new Consumer($driver);
+            $this->consumer[$topic] = $temp;
         }
-        if($this->consumer == null){
-            $this->consumer = new Consumer($this->driver);
-        }
-        return $this->consumer;
+        return $this->consumer[$topic];
     }
 
-    function producer(bool $renew = false):Producer
+    function producer(string $topic,bool $renew = false):Producer
     {
-        if(!$renew){
-            $this->producer = new Producer($this->driver, $this->nodeId);
+        if((!$renew) || !isset($this->producer[$topic])){
+            $driver = clone $this->driver;
+            if(!$driver->init($topic,$this->nodeId)){
+                throw new Exception("init queue topic:{$topic} driver fail");
+            }
+            $temp = new Producer($driver,$this->nodeId);
+            $this->producer[$topic] = $temp;
         }
-        if($this->producer == null){
-            $this->producer = new Producer($this->driver, $this->nodeId);
-        }
-        return $this->producer;
+        return $this->producer[$topic];
     }
 
     function info():?array

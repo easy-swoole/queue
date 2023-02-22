@@ -17,7 +17,7 @@
     "require": {
         "ext-swoole": ">=4.4.0",
         "easyswoole/redis": "^2.0",
-        "easyswoole/pool": "^1.2"
+        "easyswoole/pool": "^2.0"
     },
     "require-dev": {
         "easyswoole/swoole-ide-helper": "^1.0"
