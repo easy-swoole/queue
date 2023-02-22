@@ -11,6 +11,9 @@ class Queue
     private $driver;
     private $nodeId;
 
+    private $consumer;
+    private $producer;
+
     function __construct(QueueDriverInterface $driver)
     {
         $this->driver = $driver;
@@ -22,14 +25,26 @@ class Queue
         return $this->driver;
     }
 
-    function consumer():Consumer
+    function consumer(bool $renew = false):Consumer
     {
-        return new Consumer($this->driver);
+        if(!$renew){
+            $this->consumer = new Consumer($this->driver);
+        }
+        if($this->consumer == null){
+            $this->consumer = new Consumer($this->driver);
+        }
+        return $this->consumer;
     }
 
-    function producer():Producer
+    function producer(bool $renew = false):Producer
     {
-        return new Producer($this->driver, $this->nodeId);
+        if(!$renew){
+            $this->producer = new Producer($this->driver, $this->nodeId);
+        }
+        if($this->producer == null){
+            $this->producer = new Producer($this->driver, $this->nodeId);
+        }
+        return $this->producer;
     }
 
     function info():?array
