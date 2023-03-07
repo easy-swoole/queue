@@ -4,11 +4,12 @@
 namespace EasySwoole\Queue\Driver;
 
 
-use EasySwoole\Queue\Driver\Pool\RedisPool;
 use EasySwoole\Queue\Job;
 use EasySwoole\Queue\QueueDriverInterface;
+use EasySwoole\Redis\ClusterConfig;
 use EasySwoole\Redis\Config;
 use EasySwoole\Redis\Redis;
+use EasySwoole\RedisPool\_Pool;
 use Swoole\Coroutine;
 use EasySwoole\Pool\Config as PoolConfig;
 
@@ -22,7 +23,7 @@ class RedisQueue implements QueueDriverInterface
 
     protected $hasInit = false;
 
-    public function __construct(Config $config)
+    public function __construct(Config|ClusterConfig $config)
     {
         $this->config = new PoolConfig();
         $this->config->setExtraConf($config);
@@ -34,7 +35,7 @@ class RedisQueue implements QueueDriverInterface
             $this->hasInit = true;
         }
         $this->queueName = $topicName;
-        $this->pool = new RedisPool($this->config);
+        $this->pool = new _Pool($this->config);
         return true;
     }
 

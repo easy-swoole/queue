@@ -15,9 +15,10 @@
         }
     },
     "require": {
+        "php": ">=8.0",
         "ext-swoole": ">=4.4.0",
         "easyswoole/redis": "^2.0",
-        "easyswoole/pool": "^2.0"
+        "easyswoole/redis-pool": "^3.0"
     },
     "require-dev": {
         "easyswoole/swoole-ide-helper": "^1.0"
