@@ -31,9 +31,10 @@ class RedisQueue implements QueueDriverInterface
 
     public function init(string $topicName, ?string $nodeId): bool
     {
-        if(!$this->hasInit){
-            $this->hasInit = true;
+        if($this->hasInit){
+            return true;
         }
+        $this->hasInit = true;
         $this->queueName = $topicName;
         $this->pool = new _Pool($this->config);
         return true;
@@ -172,6 +173,8 @@ class RedisQueue implements QueueDriverInterface
 
     public function __clone()
     {
-
+        if($this->pool){
+            $this->pool = clone $this->pool;
+        }
     }
 }
