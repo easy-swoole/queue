@@ -41,7 +41,7 @@ class Queue
 
     function producer(string $topic,bool $renew = false):Producer
     {
-        if((!$renew) || !isset($this->producer[$topic])){
+        if(($renew) || !isset($this->producer[$topic])){
             $driver = clone $this->driver;
             if(!$driver->init($topic,$this->nodeId)){
                 throw new Exception("init queue topic:{$topic} driver fail");
