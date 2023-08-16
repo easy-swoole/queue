@@ -28,7 +28,7 @@ class Queue
 
     function consumer(string $topic,bool $renew = false):Consumer
     {
-        if((!$renew) || !isset($this->consumer[$topic])){
+        if(($renew) || !isset($this->consumer[$topic])){
             $driver = clone $this->driver;
             if(!$driver->init($topic,$this->nodeId)){
                 throw new Exception("init queue topic:{$topic} driver fail");
