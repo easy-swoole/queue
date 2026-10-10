@@ -9,6 +9,9 @@ class Config extends \EasySwoole\Pool\Config
     public const MODE_STANDALONE = 'standalone';
     public const MODE_CLUSTER = 'cluster';
 
+    /** Redis 连接池默认最大连接数。 */
+    protected int $maxObjectNum = 20;
+
     /** 共同配置：连接模式，支持 standalone 和 cluster。 */
     protected string $mode = self::MODE_STANDALONE;
 
