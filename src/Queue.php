@@ -10,11 +10,11 @@ use EasySwoole\Utility\Random;
 
 class Queue
 {
-    private $driver;
-    private $nodeId;
+    private QueueDriverInterface $driver;
+    private string $nodeId;
 
-    private $consumer = [];
-    private $producer = [];
+    private array $consumer = [];
+    private array $producer = [];
 
     function __construct(QueueDriverInterface $driver)
     {
@@ -58,18 +58,13 @@ class Queue
         return $this->driver->info();
     }
 
-    /**
-     * @return bool|string
-     */
-    public function getNodeId()
+
+    public function getNodeId():string
     {
         return $this->nodeId;
     }
 
-    /**
-     * @param bool|string $nodeId
-     */
-    public function setNodeId($nodeId): void
+    public function setNodeId(string $nodeId): void
     {
         $this->nodeId = $nodeId;
     }
