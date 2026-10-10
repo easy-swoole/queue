@@ -17,6 +17,7 @@
     "require": {
         "php": ">=8.0",
         "ext-swoole": ">=5.1",
+        "ext-redis": "*",
         "easyswoole/utility": "^1.4",
         "easyswoole/pool": "^3.0"
     },
