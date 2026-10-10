@@ -6,13 +6,14 @@ namespace EasySwoole\Queue;
 
 class Job
 {
-    protected $jobData;
-    protected $jobId;
-    protected $nodeId;
-    protected $delayTime = 0;
-    protected $retryTimes = 0;
-    protected $runTimes = 0;
-    protected $waitConfirmTime = 3;
+    protected mixed $jobData;
+    protected string $jobId;
+    protected string $nodeId;
+    protected int $delayTime = 0;
+    protected int $retryTimes = 0;
+    protected int $runTimes = 0;
+    protected int $waitConfirmTime = 10;
+    protected ?string $queueReceiptId = null;
 
     /**
      * @return mixed
@@ -127,5 +128,18 @@ class Job
     public function setWaitConfirmTime(int $waitConfirmTime): void
     {
         $this->waitConfirmTime = $waitConfirmTime;
+    }
+
+    /**
+     * Redis driver 内部使用的消费回执，业务代码无需设置。
+     */
+    public function getQueueReceiptId(): ?string
+    {
+        return $this->queueReceiptId;
+    }
+
+    public function setQueueReceiptId(?string $queueReceiptId): void
+    {
+        $this->queueReceiptId = $queueReceiptId;
     }
 }

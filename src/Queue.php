@@ -27,9 +27,9 @@ class Queue
         return $this->driver;
     }
 
-    function consumer(string $topic,bool $renew = false):Consumer
+    function consumer(string $topic):Consumer
     {
-        if(($renew) || !isset($this->consumer[$topic])){
+        if(!isset($this->consumer[$topic])){
             $driver = clone $this->driver;
             if(!$driver->init($topic,$this->nodeId)){
                 throw new Exception("init queue topic:{$topic} driver fail");
@@ -40,9 +40,9 @@ class Queue
         return $this->consumer[$topic];
     }
 
-    function producer(string $topic,bool $renew = false):Producer
+    function producer(string $topic):Producer
     {
-        if(($renew) || !isset($this->producer[$topic])){
+        if(!isset($this->producer[$topic])){
             $driver = clone $this->driver;
             if(!$driver->init($topic,$this->nodeId)){
                 throw new Exception("init queue topic:{$topic} driver fail");

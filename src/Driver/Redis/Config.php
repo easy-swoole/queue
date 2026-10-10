@@ -48,6 +48,15 @@ class Config extends \EasySwoole\Pool\Config
     /** 共同配置：流上下文，例如 TLS/SSL 参数。 */
     protected array $context = [];
 
+    /** 共同配置：任务原子领取后、写入其实际确认时间前的兜底可见性超时，单位为秒。 */
+    protected int $reservationTimeout = 30;
+
+    /** 共同配置：每次迁移到期任务或恢复未确认任务的最大数量。 */
+    protected int $migrationBatchSize = 100;
+
+    /** 共同配置：模拟阻塞出队时的轮询间隔，单位为秒。 */
+    protected float $popPollInterval = 0.05;
+
     public function getMode(): string { return $this->mode; }
 
     public function setMode(string $mode): self
@@ -186,6 +195,39 @@ class Config extends \EasySwoole\Pool\Config
         return $this;
     }
 
+    public function getReservationTimeout(): int { return $this->reservationTimeout; }
+
+    public function setReservationTimeout(int $reservationTimeout): self
+    {
+        if ($reservationTimeout < 1) {
+            throw new Exception('redis reservation timeout must be positive');
+        }
+        $this->reservationTimeout = $reservationTimeout;
+        return $this;
+    }
+
+    public function getMigrationBatchSize(): int { return $this->migrationBatchSize; }
+
+    public function setMigrationBatchSize(int $migrationBatchSize): self
+    {
+        if ($migrationBatchSize < 1) {
+            throw new Exception('redis migration batch size must be positive');
+        }
+        $this->migrationBatchSize = $migrationBatchSize;
+        return $this;
+    }
+
+    public function getPopPollInterval(): float { return $this->popPollInterval; }
+
+    public function setPopPollInterval(float $popPollInterval): self
+    {
+        if ($popPollInterval <= 0) {
+            throw new Exception('redis pop poll interval must be positive');
+        }
+        $this->popPollInterval = $popPollInterval;
+        return $this;
+    }
+
     protected function initialize(): void
     {
         parent::initialize();
@@ -197,6 +239,9 @@ class Config extends \EasySwoole\Pool\Config
         $this->setConnectTimeout($this->connectTimeout);
         $this->setReadTimeout($this->readTimeout);
         $this->setRetryInterval($this->retryInterval);
+        $this->setReservationTimeout($this->reservationTimeout);
+        $this->setMigrationBatchSize($this->migrationBatchSize);
+        $this->setPopPollInterval($this->popPollInterval);
 
         if ($this->mode === self::MODE_CLUSTER && $this->seeds === []) {
             throw new Exception('redis cluster seeds cannot be empty');

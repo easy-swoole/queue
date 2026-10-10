@@ -9,8 +9,8 @@ use EasySwoole\Utility\Random;
 
 class Producer
 {
-    private $driver;
-    private $nodeId;
+    private QueueDriverInterface $driver;
+    private string $nodeId;
 
     function __construct(QueueDriverInterface $driver,string $nodeId)
     {
