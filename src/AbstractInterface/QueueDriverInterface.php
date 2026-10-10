@@ -1,8 +1,10 @@
 <?php
 
 
-namespace EasySwoole\Queue;
+namespace EasySwoole\Queue\AbstractInterface;
 
+
+use EasySwoole\Queue\Job;
 
 interface QueueDriverInterface
 {

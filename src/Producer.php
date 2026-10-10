@@ -4,6 +4,7 @@
 namespace EasySwoole\Queue;
 
 
+use EasySwoole\Queue\AbstractInterface\QueueDriverInterface;
 use EasySwoole\Utility\Random;
 
 class Producer

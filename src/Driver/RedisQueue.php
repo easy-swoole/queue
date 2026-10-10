@@ -4,14 +4,14 @@
 namespace EasySwoole\Queue\Driver;
 
 
+use EasySwoole\Pool\Config as PoolConfig;
+use EasySwoole\Queue\AbstractInterface\QueueDriverInterface;
 use EasySwoole\Queue\Job;
-use EasySwoole\Queue\QueueDriverInterface;
 use EasySwoole\Redis\ClusterConfig;
 use EasySwoole\Redis\Config;
 use EasySwoole\Redis\Redis;
 use EasySwoole\RedisPool\_Pool;
 use Swoole\Coroutine;
-use EasySwoole\Pool\Config as PoolConfig;
 
 class RedisQueue implements QueueDriverInterface
 {

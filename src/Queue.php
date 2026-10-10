@@ -4,6 +4,7 @@
 namespace EasySwoole\Queue;
 
 
+use EasySwoole\Queue\AbstractInterface\QueueDriverInterface;
 use EasySwoole\Queue\Exception\Exception;
 use EasySwoole\Utility\Random;
 
