@@ -1,6 +1,6 @@
 # Queue
 
-EasySwoole Queue 提供普通任务、延迟任务和需要确认的可信任务。当前 Redis 驱动支持 Redis 单机和 Redis Cluster，并内置连接池。
+EasySwoole Queue 提供普通任务、延迟任务和需要确认的可信任务。当前提供 Redis 和 RabbitMQ 驱动，并内置连接池；Redis 驱动同时支持单机和 Redis Cluster。
 
 ## 安装
 
@@ -94,6 +94,76 @@ Cluster 模式下，同一个 topic 使用的所有 Redis key 都带有相同的
 | `popPollInterval` | `0.05` | ✓ | ✓ | 空队列短轮询间隔，单位为秒 |
 
 连接池还可以使用 `minObjectNum`、`maxObjectNum`、`getObjectTimeout` 等 `EasySwoole\Pool\Config` 配置项。
+
+## RabbitMQ 配置
+
+RabbitMQ 驱动基于 `php-amqplib/php-amqplib`。该客户端内部使用 `stream_select()`，
+因此必须在协程启动前同时开启 TCP Hook 和 Stream Hook：
+
+```php
+use Swoole\Coroutine;
+
+Coroutine::set([
+    'hook_flags' => SWOOLE_HOOK_TCP | SWOOLE_HOOK_STREAM_FUNCTION,
+]);
+```
+
+在提供 `SWOOLE_HOOK_STREAM_SELECT` 常量的 Swoole 版本中，它与
+`SWOOLE_HOOK_STREAM_FUNCTION` 表示相同的 Stream Hook。
+
+```php
+use EasySwoole\Queue\Driver\RabbitMQ\Config;
+use EasySwoole\Queue\Driver\RabbitMQ\RabbitMQ;
+use EasySwoole\Queue\Queue;
+
+$config = new Config();
+$config->setHost('127.0.0.1');
+$config->setPort(5672);
+$config->setUsername('easyswoole');
+$config->setPassword('password');
+$config->setVirtualHost('/easyswoole');
+$config->setConnectTimeout(3.0);
+$config->setReadWriteTimeout(3.0);
+$config->setHeartbeat(0);
+$config->setMinObjectNum(1);
+$config->setMaxObjectNum(20);
+
+$queue = new Queue(new RabbitMQ($config));
+```
+
+| 配置项 | 默认值 | 说明 |
+| --- | ---: | --- |
+| `host` | `127.0.0.1` | RabbitMQ 地址 |
+| `port` | `5672` | AMQP 端口 |
+| `username` | `guest` | 登录用户名 |
+| `password` | `guest` | 登录密码 |
+| `virtualHost` | `/` | Virtual host |
+| `connectTimeout` | `3.0` | 连接超时，单位为秒 |
+| `readWriteTimeout` | `3.0` | 网络读写超时，单位为秒 |
+| `keepalive` | `false` | 是否开启 TCP keepalive |
+| `heartbeat` | `0` | AMQP 心跳间隔；0 表示关闭 |
+| `context` | `[]` | TLS 等流上下文参数 |
+| `popPollInterval` | `0.05` | 空队列短轮询间隔，单位为秒 |
+| `queuePrefix` | `easyswoole.queue.` | RabbitMQ 队列名称前缀 |
+| `prefetchCount` | `100` | 单个消费连接允许同时处理中、尚未确认的可信任务数 |
+| `consumerBufferSize` | `1000` | Broker 消息进入 `pop()` 前的本地协程缓冲区容量 |
+
+RabbitMQ 驱动使用一个独立的后台消费长连接，通过 `basic_consume` 接收消息，并把任务分发到本地协程缓冲区。普通任务进入本地缓冲区后立即 ACK，可信任务则等待业务调用 `confirm()`。ACK、确认超时和重投都由拥有原 Channel 的后台协程统一执行，因此每条可信任务不会单独占用连接；同一进程内同时处理的可信任务数量主要由 `prefetchCount` 控制。
+
+发布和消费分别使用连接池：发布池隔离多个业务协程的并发写入，消费池固定为 `minObjectNum=1`、`maxObjectNum=1`，其长连接不占用发布池配额。可信任务确认超时后，驱动会先用 Publisher Confirm 发布带有最新 `runTimes` 的任务，再 ACK 原消息。进程或连接在确认前异常中断时，RabbitMQ 会重新投递尚未 ACK 的原消息；业务仍需保持幂等。
+
+可信任务场景建议从默认的 `prefetchCount=100` 开始调优。该值过大会让消费协程连续接收过多未确认消息，增加业务协程提交 `confirm()` 的等待时间；应根据单进程实际并发任务数和处理耗时逐步调整。
+
+生产环境建议启用非零 `heartbeat`，让连接池健康检查能够发现静默断线和 TCP 半开连接。`php-amqplib` 要求 `readWriteTimeout` 至少为 heartbeat 的两倍，例如：
+
+```php
+$config->setHeartbeat(10);
+$config->setReadWriteTimeout(25.0);
+```
+
+`heartbeat=0` 时仍会检查连接和 Channel 的本地状态，但无法通过心跳发现静默断线。
+
+RabbitMQ 延迟任务使用带消息 TTL 的延迟队列和 Dead Letter Exchange 实现。RabbitMQ 只会检查队首消息是否过期，因此同一延迟队列中混用不同延迟时间时，短延迟消息可能被前面的长延迟消息阻塞；需要严格定时精度的场景应使用固定 TTL 队列或延迟消息插件。
 
 ## 普通任务
 
@@ -241,6 +311,36 @@ composer test
 - 可信任务领取与确认。
 - `waitConfirmTime` 内不会重复领取，超时后重新投递。
 - 延迟任务到期前不可见、到期后可消费。
+
+## 性能与可靠性基准
+
+以下结果于 2026-10-11 在一台阿里云 2 核 2GB 实例上测得。Redis、RabbitMQ、PHP 客户端和压测程序均运行在同一台实例，通过 `127.0.0.1` 通信，因此结果主要反映队列驱动及服务端处理能力，不包含公网延迟。
+
+测试环境和口径：
+
+- 2 vCPU，实例标称 2GB 内存，操作系统可见约 1.6GiB。
+- PHP 8.4.26、Swoole 6.2.2。
+- Redis 6.2.22，单机模式，RDB 开启、AOF 关闭。
+- RabbitMQ 4.3.6，持久化队列和持久化消息，Publisher Confirm 开启。
+- 发布连接池最大连接数为 20，同时使用 20 个发布协程和 20 个消费协程；RabbitMQ 另有一个固定 `1/1` 的消费连接池。
+- RabbitMQ 使用 `heartbeat=10`、`readWriteTimeout=25`、`prefetchCount=100`。
+- 每个 Job 的 `jobData` 为 256 字节；每种驱动和任务模式每轮处理 20,000 条任务，连续执行三轮，表中为三轮中位数。
+
+| 驱动 | 任务模式 | Push | Pop / Confirm |
+| --- | --- | ---: | ---: |
+| Redis | 普通任务 | 13,484 条/秒 | 9,257 条/秒 |
+| Redis | 可信任务 | 13,511 条/秒 | 3,812 条/秒 |
+| RabbitMQ | 普通任务 | 1,779 条/秒 | 4,417 条/秒 |
+| RabbitMQ | 可信任务 | 1,764 条/秒 | 3,654 条/秒 |
+
+可靠性检查结果：
+
+- 共处理 240,000 条任务，其中可信任务 120,000 条；每轮均为 20,000 个唯一 Job、0 个重复、0 个错误，消费完成后队列数量为 0。
+- 100 条 RabbitMQ 可信任务同时确认超时后全部重新投递，`runTimes` 均由 1 变为 2，重新确认后队列为空。
+- 强制断开 RabbitMQ 消费连接后，旧回执全部确认失败；驱动自动重建消费连接，300 条任务全部恢复，测试中没有丢失或重复。
+- 在 10,000 次并发发布期间由服务端关闭 21 个 RabbitMQ 连接，19 个在途 Publisher Confirm 明确抛出连接关闭异常，其余 9,981 条成功；连接池重建后追加 100 条全部成功，Broker 最终计数准确为 10,081，没有静默丢失。
+
+这些数据用于展示上述固定环境下的参考性能，不代表不同硬件、持久化策略、消息大小和业务处理逻辑下的保证值。可信队列采用“至少投递一次”语义；网络在确认临界点中断时，调用方重试仍可能产生重复，因此业务处理必须保持幂等。
 
 ## 自定义驱动
 

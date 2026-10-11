@@ -6,6 +6,7 @@
         "easySwoole",
         "Queue",
         "Redis",
+        "RabbitMQ",
         "beanstalkd"
     ],
     "license": "Apache-2.0",
@@ -24,7 +25,8 @@
         "ext-swoole": ">=5.1",
         "ext-redis": "*",
         "easyswoole/utility": "^1.4",
-        "easyswoole/pool": "^3.0"
+        "easyswoole/pool": "^3.0",
+        "php-amqplib/php-amqplib": "^3.7"
     },
     "require-dev": {
         "easyswoole/swoole-ide-helper": "^1.0",
