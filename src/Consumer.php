@@ -9,11 +9,11 @@ use Swoole\Coroutine;
 
 class Consumer
 {
-    private $driver;
+    private QueueDriverInterface $driver;
 
-    private $enableListen = false;
-    private $onBreak;
-    private $breakTime = 0.01;
+    private bool $enableListen = false;
+    private mixed $onBreak = null;
+    private float $breakTime = 0.01;
 
     function __construct(QueueDriverInterface $driver)
     {
@@ -37,8 +37,9 @@ class Consumer
                 } else {
                     if($this->onBreak){
                         call_user_func($this->onBreak,$this);
+                    }else{
+                        Coroutine::sleep($this->breakTime);
                     }
-                    Coroutine::sleep($this->breakTime);
                 }
             }catch (\Throwable $throwable){
                 if($onException){

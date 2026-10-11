@@ -14,6 +14,11 @@
             "EasySwoole\\Queue\\": "src/"
         }
     },
+    "autoload-dev": {
+        "psr-4": {
+            "EasySwoole\\Queue\\Tests\\": "tests/"
+        }
+    },
     "require": {
         "php": ">=8.0",
         "ext-swoole": ">=5.1",
@@ -22,6 +27,10 @@
         "easyswoole/pool": "^3.0"
     },
     "require-dev": {
-        "easyswoole/swoole-ide-helper": "^1.0"
+        "easyswoole/swoole-ide-helper": "^1.0",
+        "phpunit/phpunit": "^9.6"
+    },
+    "scripts": {
+        "test": "phpunit"
     }
 }
