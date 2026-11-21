@@ -20,7 +20,7 @@ class Pool extends AbstractPool
                 $config->getReadTimeout(),
                 $config->isPersistent(),
                 $config->getAuth(),
-                $config->getContext()
+                $config->getContext() ?: null
             );
         }
 

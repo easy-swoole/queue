@@ -14,11 +14,109 @@ use Swoole\Coroutine;
  */
 class Redis implements QueueDriverInterface
 {
+    private const INDEX_NOT_INITIALIZED = 'initialize-job-index';
+
+    private const INDEX_GUARD = <<<'LUA'
+if redis.call('HEXISTS', KEYS[8], 'initialized') == 0 then
+    return 'initialize-job-index'
+end
+
+LUA;
+
+    private const RELEASE_JOB = <<<'LUA'
+local function releaseJob(entry)
+    if string.sub(entry, 1, 2) == 'j:' then
+        local separator = string.find(entry, '\n', 3, true)
+        if separator then
+            redis.call('HDEL', KEYS[8], string.sub(entry, 1, separator - 1))
+        end
+    end
+end
+
+LUA;
+
+    private const PUSH_SCRIPT = self::INDEX_GUARD . <<<'LUA'
+if redis.call('HEXISTS', KEYS[8], ARGV[1]) == 1 then
+    return 1
+end
+if ARGV[3] ~= '' then
+    redis.call('ZADD', KEYS[tonumber(ARGV[4])], ARGV[3], ARGV[2])
+else
+    redis.call('RPUSH', KEYS[tonumber(ARGV[4])], ARGV[2])
+end
+redis.call('HSET', KEYS[8], ARGV[1], 1)
+return 1
+LUA;
+
+    /** 旧驱动停写后，读取整个主题的一致快照；其他新驱动通过初始化标记协调。 */
+    private const LEGACY_SNAPSHOT_SCRIPT = <<<'LUA'
+if redis.call('HEXISTS', KEYS[8], 'initialized') == 1 then
+    return nil
+end
+redis.call('ZCARD', KEYS[6])
+return {
+    redis.call('HGETALL', KEYS[5]),
+    redis.call('LRANGE', KEYS[1], 0, -1),
+    redis.call('LRANGE', KEYS[2], 0, -1),
+    redis.call('ZRANGE', KEYS[3], 0, -1, 'WITHSCORES'),
+    redis.call('ZRANGE', KEYS[4], 0, -1, 'WITHSCORES')
+}
+LUA;
+
+    private const INITIALIZE_INDEX_SCRIPT = <<<'LUA'
+if redis.call('HEXISTS', KEYS[8], 'initialized') == 1 then
+    return 1
+end
+local offset = 1
+local function count()
+    local value = tonumber(ARGV[offset])
+    offset = offset + 1
+    return value
+end
+local function nextArg()
+    local value = ARGV[offset]
+    offset = offset + 1
+    return value
+end
+
+for _ = 1, count() do
+    local receipt = nextArg()
+    redis.call('HDEL', KEYS[5], receipt)
+    redis.call('ZREM', KEYS[6], receipt)
+end
+for _ = 1, count() do
+    local receipt = nextArg()
+    redis.call('HSET', KEYS[5], receipt, nextArg())
+end
+for key = 1, 4 do
+    redis.call('DEL', KEYS[key])
+    for _ = 1, count() do
+        if key < 3 then
+            redis.call('RPUSH', KEYS[key], nextArg())
+        else
+            local score = nextArg()
+            redis.call('ZADD', KEYS[key], score, nextArg())
+        end
+    end
+end
+for field = offset, #ARGV do
+    redis.call('HSET', KEYS[8], ARGV[field], 1)
+end
+redis.call('HSET', KEYS[8], 'initialized', 1)
+return 1
+LUA;
+
+    private const FLUSH_SCRIPT = <<<'LUA'
+redis.call('DEL', unpack(KEYS))
+redis.call('HSET', KEYS[8], 'initialized', 1)
+return 1
+LUA;
+
     /**
      * 在一次 Redis 往返中完成延迟任务迁移、超时任务恢复和任务领取。
      * 返回值首项为任务类型：0 表示普通任务，消费后无需确认；其他值为可信任务的消费回执。
      */
-    private const CLAIM_SCRIPT = <<<'LUA'
+    private const CLAIM_SCRIPT = self::INDEX_GUARD . self::RELEASE_JOB . <<<'LUA'
 if ARGV[4] == '1' then
     local function promote(delayKey, readyKey)
         local payloads = redis.call('ZRANGEBYSCORE', delayKey, '-inf', ARGV[1], 'LIMIT', 0, ARGV[2])
@@ -50,6 +148,7 @@ local payload = nil
 if normalFirst then
     payload = redis.call('LPOP', KEYS[1])
     if payload then
+        releaseJob(payload)
         return {'0', payload}
     end
     payload = redis.call('LPOP', KEYS[2])
@@ -58,6 +157,7 @@ else
     if not payload then
         payload = redis.call('LPOP', KEYS[1])
         if payload then
+            releaseJob(payload)
             return {'0', payload}
         end
     end
@@ -67,7 +167,7 @@ if not payload then
     return nil
 end
 
-local receipt = tostring(sequence)
+local receipt = ARGV[5]
 redis.call('HSET', KEYS[5], receipt, payload)
 redis.call('ZADD', KEYS[6], ARGV[1] + ARGV[3], receipt)
 return {receipt, payload}
@@ -93,10 +193,14 @@ return 1
 LUA;
 
     /** 原子确认任务，同时删除处理中内容和对应的确认期限。 */
-    private const ACK_SCRIPT = <<<'LUA'
-local removed = redis.call('HDEL', KEYS[1], ARGV[1])
-redis.call('ZREM', KEYS[2], ARGV[1])
-return removed
+    private const ACK_SCRIPT = self::INDEX_GUARD . self::RELEASE_JOB . <<<'LUA'
+local entry = redis.call('HGET', KEYS[5], ARGV[1])
+if entry then
+    releaseJob(entry)
+    redis.call('HDEL', KEYS[5], ARGV[1])
+end
+redis.call('ZREM', KEYS[6], ARGV[1])
+return entry and 1 or 0
 LUA;
 
     /** Redis 连接及连接池配置。 */
@@ -137,26 +241,21 @@ LUA;
 
     public function push(Job $job, float $timeout = 3.0): bool
     {
-        // 回执只属于某一次消费，重新入队时不能持久化旧回执。
-        $payload = $this->encodeJob($job);
+        if ($job->getJobId() === '') {
+            $job->setJobId(bin2hex(random_bytes(16)));
+        }
+        $field = $this->jobIndexField($job->getJobId());
+        $entry = $field . "\n" . $this->encodeJob($job);
 
-        return $this->invoke(function (Client|ClusterClient $redis) use ($job, $payload): bool {
-            $reliable = $job->getRetryTimes() !== 0;
-
-            // 延迟任务以计划执行时间为 score 保存。
+        return $this->invoke(function (Client|ClusterClient $redis) use ($job, $field, $entry): bool {
+            $queue = $job->getRetryTimes() !== 0 ? 2 : 1;
+            $deadline = '';
             if ($job->getDelayTime() > 0) {
-                return $redis->zAdd(
-                    $reliable ? $this->reliableDelayQueueKey() : $this->normalDelayQueueKey(),
-                    time() + $job->getDelayTime(),
-                    $payload
-                ) !== false;
+                $queue += 2;
+                $deadline = (string) (time() + $job->getDelayTime());
             }
 
-            // 普通任务直接追加到待执行 List 尾部。
-            return $redis->rPush(
-                $reliable ? $this->reliableQueueKey() : $this->normalQueueKey(),
-                $payload
-            ) !== false;
+            return $this->evalQueueScript($redis, self::PUSH_SCRIPT, [$field, $entry, $deadline, $queue]) === 1;
         }, $timeout);
     }
 
@@ -182,23 +281,20 @@ LUA;
                 }
 
                 // 普通任务直接出队；可信任务则原子地出队并写入处理中集合。
-                $claimed = $this->evalScript($redis, self::CLAIM_SCRIPT, [
-                    $this->normalQueueKey(),
-                    $this->reliableQueueKey(),
-                    $this->normalDelayQueueKey(),
-                    $this->reliableDelayQueueKey(),
-                    $this->processingQueueKey(),
-                    $this->processingDeadlineKey(),
-                    $this->receiptSequenceKey(),
+                $claimed = $this->evalQueueScript($redis, self::CLAIM_SCRIPT, [
                     $now,
                     $this->config->getMigrationBatchSize(),
                     $this->config->getReservationTimeout(),
                     $maintain ? 1 : 0,
-                ], 7);
+                    rtrim(strtr(base64_encode(random_bytes(16)), '+/', '-_'), '='),
+                ]);
 
                 if (is_array($claimed) && isset($claimed[0], $claimed[1])) {
                     $receipt = (string) $claimed[0];
-                    $job = $this->decodeJob((string) $claimed[1]);
+                    $entry = (string) $claimed[1];
+                    $separator = str_starts_with($entry, 'j:') ? strpos($entry, "\n") : false;
+                    $headerLength = $separator === false ? 0 : $separator + 1;
+                    $job = $this->decodeJob(substr($entry, $headerLength));
                     // 普通任务没有处理中记录；可信任务遇到非法数据时需要清理领取记录。
                     if ($job === null) {
                         if ($receipt !== '0') {
@@ -233,7 +329,7 @@ LUA;
                         $this->processingQueueKey(),
                         $this->processingDeadlineKey(),
                         $receipt,
-                        $this->encodeJob($reservedJob),
+                        substr($entry, 0, $headerLength) . $this->encodeJob($reservedJob),
                         time() + max(1, $job->getWaitConfirmTime()),
                     ], 2);
                     if ((int) $updated !== 1) {
@@ -292,25 +388,17 @@ LUA;
             return false;
         }
 
-        return $this->invoke(function (Client|ClusterClient $redis) use ($receipt): bool {
-            return $this->evalScript($redis, self::ACK_SCRIPT, [
-                $this->processingQueueKey(),
-                $this->processingDeadlineKey(),
-                $receipt,
-            ], 2) !== false;
-        }, $timeout);
+        return $this->invoke(
+            fn (Client|ClusterClient $redis): bool => $this->acknowledge($redis, $receipt),
+            $timeout
+        );
     }
 
     public function flush(): bool
     {
-        return $this->invoke(function (Client|ClusterClient $redis): bool {
-            foreach ($this->allQueueKeys() as $key) {
-                if ($redis->del($key) === false) {
-                    return false;
-                }
-            }
-            return true;
-        });
+        return $this->invoke(fn (Client|ClusterClient $redis): bool =>
+            $this->evalScript($redis, self::FLUSH_SCRIPT, $this->allQueueKeys(), 8) === 1
+        );
     }
 
     public function __clone()
@@ -355,13 +443,102 @@ LUA;
         return $redis->eval($script, $arguments, $keyCount);
     }
 
-    private function acknowledge(Client|ClusterClient $redis, string $receipt): void
+    private function acknowledge(Client|ClusterClient $redis, string $receipt): bool
     {
-        $this->evalScript($redis, self::ACK_SCRIPT, [
-            $this->processingQueueKey(),
-            $this->processingDeadlineKey(),
-            $receipt,
-        ], 2);
+        return $this->evalQueueScript($redis, self::ACK_SCRIPT, [$receipt]) !== false;
+    }
+
+    private function evalQueueScript(Client|ClusterClient $redis, string $script, array $args): mixed
+    {
+        $keys = $this->allQueueKeys();
+        $arguments = array_merge($keys, $args);
+        $result = $this->evalScript($redis, $script, $arguments, count($keys));
+        if ($result !== self::INDEX_NOT_INITIALIZED) {
+            return $result;
+        }
+
+        $this->initializeJobIndex($redis, $keys);
+        $result = $this->evalScript($redis, $script, $arguments, count($keys));
+        if ($result === self::INDEX_NOT_INITIALIZED) {
+            throw new \RuntimeException('redis queue job index was lost');
+        }
+        return $result;
+    }
+
+    private function initializeJobIndex(Client|ClusterClient $redis, array $keys): void
+    {
+        $snapshot = $this->evalScript($redis, self::LEGACY_SNAPSHOT_SCRIPT, $keys, count($keys));
+        if (!is_array($snapshot)) {
+            // 另一个消费者可能已经完成迁移；后续脚本会重新检查标记。
+            return;
+        }
+
+        $seen = [];
+        $index = function (string $entry) use (&$seen): ?string {
+            try {
+                $jobId = $this->decodeJob($entry)?->getJobId();
+            } catch (\Throwable) {
+                // 保留无法反序列化的旧数据，由原有消费流程处理。
+                return $entry;
+            }
+            if ($jobId === null || $jobId === '') {
+                return $entry;
+            }
+
+            $field = $this->jobIndexField($jobId);
+            if (isset($seen[$field])) {
+                return null;
+            }
+            $seen[$field] = true;
+            return $field . "\n" . $entry;
+        };
+
+        // 保留已领取任务的回执和期限，待消费任务保留队列顺序，延迟任务保留原分值。
+        [$processing, $normal, $reliable, $normalDelay, $reliableDelay] = $snapshot;
+        $removed = [];
+        $retained = [];
+        for ($i = 0; $i < count($processing); $i += 2) {
+            $receipt = $processing[$i];
+            $entry = $index($processing[$i + 1]);
+            if ($entry === null) {
+                $removed[] = $receipt;
+            } else {
+                $retained[] = $receipt;
+                $retained[] = $entry;
+            }
+        }
+
+        $args = array_merge([count($removed)], $removed, [intdiv(count($retained), 2)], $retained);
+        foreach ([$normal, $reliable] as $queue) {
+            $entries = array_values(array_filter(array_map($index, $queue), static fn ($entry) => $entry !== null));
+            $args = array_merge($args, [count($entries)], $entries);
+        }
+        foreach ([$normalDelay, $reliableDelay] as $queue) {
+            $entries = [];
+            for ($i = 0; $i < count($queue); $i += 2) {
+                $entry = $index($queue[$i]);
+                if ($entry !== null) {
+                    $entries[] = $queue[$i + 1];
+                    $entries[] = $entry;
+                }
+            }
+            $args = array_merge($args, [intdiv(count($entries), 2)], $entries);
+        }
+
+        $result = $this->evalScript(
+            $redis,
+            self::INITIALIZE_INDEX_SCRIPT,
+            array_merge($keys, $args, array_keys($seen)),
+            count($keys)
+        );
+        if ($result !== 1) {
+            throw new \RuntimeException('failed to initialize redis queue job index');
+        }
+    }
+
+    private function jobIndexField(string $jobId): string
+    {
+        return 'j:' . bin2hex($jobId);
     }
 
     private function encodeJob(Job $job): string
@@ -412,8 +589,11 @@ LUA;
     /** 处理中任务确认期限 Sorted Set，member 为消费回执。 */
     private function processingDeadlineKey(): string { return $this->keyPrefix() . '_pt'; }
 
-    /** 生成当前主题内唯一消费回执的 Redis 自增键。 */
-    private function receiptSequenceKey(): string { return $this->keyPrefix() . '_ps'; }
+    /** 用于交替领取普通任务和可信任务的 Redis 自增键。 */
+    private function dispatchSequenceKey(): string { return $this->keyPrefix() . '_ps'; }
+
+    /** 保存同一主题下仍在队列中的 Job ID。 */
+    private function jobIndexKey(): string { return $this->keyPrefix() . '_ji'; }
 
     private function allQueueKeys(): array
     {
@@ -424,7 +604,8 @@ LUA;
             $this->reliableDelayQueueKey(),
             $this->processingQueueKey(),
             $this->processingDeadlineKey(),
-            $this->receiptSequenceKey(),
+            $this->dispatchSequenceKey(),
+            $this->jobIndexKey(),
         ];
     }
 }

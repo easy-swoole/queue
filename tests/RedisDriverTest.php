@@ -46,6 +46,7 @@ final class RedisDriverTest extends TestCase
             $popped = $driver->pop(1.0);
             self::assertInstanceOf(Job::class, $popped);
             self::assertNotNull($popped->getQueueReceiptId());
+            self::assertMatchesRegularExpression('/\A[A-Za-z0-9_-]{22}\z/', $popped->getQueueReceiptId());
             self::assertSame(1, $popped->getRunTimes());
             self::assertTrue($driver->confirm($popped));
             self::assertNull($driver->pop(0.0));
@@ -78,7 +79,13 @@ final class RedisDriverTest extends TestCase
             self::assertSame('retry-payload', $second->getJobData());
             self::assertSame(2, $second->getRunTimes());
             self::assertNotSame($first->getQueueReceiptId(), $second->getQueueReceiptId());
+
+            $driver->confirm($first);
+            self::assertTrue($driver->push($this->jobWithId($job->getJobId(), 'duplicate')));
+            self::assertNull($driver->pop(0));
             self::assertTrue($driver->confirm($second));
+            self::assertTrue($driver->push($job));
+            self::assertSame(1, $driver->pop(0)?->getRunTimes());
         });
     }
 
@@ -97,6 +104,162 @@ final class RedisDriverTest extends TestCase
             self::assertInstanceOf(Job::class, $popped);
             self::assertSame('delayed-payload', $popped->getJobData());
         });
+    }
+
+    public function testConcurrentPushesKeepOneReadyJobPerId(): void
+    {
+        $this->withDriver(function (RedisDriver $driver): void {
+            $original = $this->newJob('original');
+            $duplicate = clone $original;
+            $duplicate->setJobData('replacement');
+            $duplicate->setRetryTimes(3);
+            $results = new Coroutine\Channel(8);
+            for ($i = 0; $i < 8; $i++) {
+                Coroutine::create(function () use ($driver, $original, $results): void {
+                    try {
+                        $results->push($driver->push($original));
+                    } catch (\Throwable $error) {
+                        $results->push($error);
+                    }
+                });
+            }
+            for ($i = 0; $i < 8; $i++) {
+                self::assertTrue($results->pop(3));
+            }
+
+            self::assertTrue($driver->push($duplicate));
+            self::assertSame(1, $driver->info()['runningQueue']);
+            self::assertSame('original', $driver->pop(0)?->getJobData());
+            self::assertNull($driver->pop(0));
+            self::assertTrue($driver->push($duplicate));
+            self::assertSame('replacement', $driver->pop(0)?->getJobData());
+        });
+    }
+
+    public function testDuplicateDelayedPushPreservesPayloadAndScore(): void
+    {
+        $this->withDriver(function (RedisDriver $driver): void {
+            $job = $this->newJob('original');
+            $job->setDelayTime(60);
+            $job->setRetryTimes(3);
+            self::assertTrue($driver->push($job));
+            $scheduled = $this->evalOnQueue($driver, "return redis.call('ZRANGE', KEYS[4], 0, -1, 'WITHSCORES')");
+            self::assertCount(2, $scheduled);
+
+            $replacement = clone $job;
+            $replacement->setDelayTime(120);
+            $replacement->setJobData('replacement');
+            self::assertTrue($driver->push($replacement));
+            self::assertTrue($driver->push($this->jobWithId($job->getJobId(), 'immediate')));
+            self::assertSame($scheduled, $this->evalOnQueue($driver, "return redis.call('ZRANGE', KEYS[4], 0, -1, 'WITHSCORES')"));
+
+            $this->evalOnQueue($driver, "return redis.call('ZADD', KEYS[4], ARGV[1], ARGV[2])", [time() - 1, $scheduled[0]]);
+            $popped = $driver->pop(0);
+            self::assertSame('original', $popped?->getJobData());
+            self::assertTrue($driver->push($replacement));
+            self::assertSame(0, $driver->info()['delayQueue']);
+            self::assertTrue($driver->confirm($popped));
+            self::assertTrue($driver->push($replacement));
+            self::assertSame(1, $driver->info()['delayQueue']);
+        });
+    }
+
+    public function testExhaustionAndFlushReleaseJobId(): void
+    {
+        $this->withDriver(function (RedisDriver $driver): void {
+            $job = $this->newJob('original');
+            $job->setRetryTimes(1);
+            $job->setRunTimes(1);
+            self::assertTrue($driver->push($job));
+            self::assertNull($driver->pop(0));
+
+            $job->setRunTimes(0);
+            self::assertTrue($driver->push($job));
+            $old = $driver->pop(0);
+            self::assertInstanceOf(Job::class, $old);
+            self::assertTrue($driver->flush());
+            self::assertTrue($driver->push($job));
+            $current = $driver->pop(0);
+            self::assertInstanceOf(Job::class, $current);
+            self::assertNotSame($old->getQueueReceiptId(), $current->getQueueReceiptId());
+
+            $driver->confirm($old);
+            self::assertTrue($driver->push($job));
+            self::assertNull($driver->pop(0));
+            self::assertTrue($driver->confirm($current));
+            self::assertTrue($driver->push($job));
+            self::assertInstanceOf(Job::class, $driver->pop(0));
+        });
+    }
+
+    public function testLegacyIndexMigrationPreservesInFlightJobAndOtherTopicIsIndependent(): void
+    {
+        $this->withDriver(function (RedisDriver $driver): void {
+            $original = $this->newJob('in flight');
+            $original->setRetryTimes(3);
+            $duplicate = $this->jobWithId($original->getJobId(), 'duplicate');
+            $delay = $this->newJob('legacy delay');
+            $deadline = time() + 120;
+            $this->evalOnQueue($driver, <<<'LUA'
+redis.call('DEL', KEYS[8])
+redis.call('HSET', KEYS[5], 'old-receipt', ARGV[1])
+redis.call('ZADD', KEYS[6], ARGV[4], 'old-receipt')
+redis.call('RPUSH', KEYS[1], ARGV[2])
+redis.call('ZADD', KEYS[3], ARGV[4], ARGV[3])
+return 1
+LUA, [serialize($original), serialize($duplicate), serialize($delay), $deadline]);
+
+            self::assertTrue($driver->push($duplicate));
+            self::assertNull($driver->pop(0));
+            self::assertSame((string) $deadline, $this->evalOnQueue(
+                $driver,
+                "return redis.call('ZSCORE', KEYS[6], 'old-receipt')"
+            ));
+            self::assertSame((string) $deadline, $this->evalOnQueue(
+                $driver,
+                "return redis.call('ZRANGE', KEYS[3], 0, -1, 'WITHSCORES')[2]"
+            ));
+            self::assertTrue($driver->push($this->jobWithId($delay->getJobId(), 'duplicate delay')));
+            self::assertSame(1, $driver->info()['delayQueue']);
+            self::assertSame(0, $driver->info()['runningQueue']);
+
+            $other = $this->newDriver();
+            try {
+                self::assertTrue($other->push($duplicate));
+                self::assertSame('duplicate', $other->pop(0)?->getJobData());
+            } finally {
+                try {
+                    $other->flush();
+                } finally {
+                    $this->destroyPool($other);
+                }
+            }
+
+            $original->setQueueReceiptId('old-receipt');
+            self::assertTrue($driver->confirm($original));
+            self::assertTrue($driver->push($duplicate));
+            self::assertSame('duplicate', $driver->pop(0)?->getJobData());
+        });
+    }
+
+    private function jobWithId(string $id, string $data): Job
+    {
+        $job = $this->newJob($data);
+        $job->setJobId($id);
+        return $job;
+    }
+
+    private function evalOnQueue(RedisDriver $driver, string $script, array $arguments = []): mixed
+    {
+        $keyMethod = new \ReflectionMethod($driver, 'allQueueKeys');
+        $keyMethod->setAccessible(true);
+        $keys = $keyMethod->invoke($driver);
+        $invoke = new \ReflectionMethod($driver, 'invoke');
+        $invoke->setAccessible(true);
+        return $invoke->invoke(
+            $driver,
+            static fn ($redis) => $redis->eval($script, array_merge($keys, $arguments), count($keys))
+        );
     }
 
     private function withDriver(callable $test): void

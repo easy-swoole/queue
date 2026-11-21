@@ -36,7 +36,7 @@ class Job
      */
     public function getJobId()
     {
-        return $this->jobId;
+        return $this->jobId ?? '';
     }
 
     /**
