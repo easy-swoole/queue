@@ -13,13 +13,6 @@ use Swoole\Coroutine;
 
 final class RabbitMQDriverTest extends TestCase
 {
-    public static function setUpBeforeClass(): void
-    {
-        Coroutine::set([
-            'hook_flags' => SWOOLE_HOOK_TCP | SWOOLE_HOOK_STREAM_FUNCTION,
-        ]);
-    }
-
     public function testNormalJobCanBePushedAndPopped(): void
     {
         $this->withDriver(function (RabbitMQ $driver): void {
@@ -80,6 +73,7 @@ final class RabbitMQDriverTest extends TestCase
             self::assertSame('retry-payload', $second->getJobData());
             self::assertSame(2, $second->getRunTimes());
             self::assertNotSame($first->getQueueReceiptId(), $second->getQueueReceiptId());
+            self::assertFalse($driver->confirm($first));
             self::assertTrue($driver->confirm($second));
         });
     }
@@ -98,6 +92,25 @@ final class RabbitMQDriverTest extends TestCase
 
             self::assertInstanceOf(Job::class, $popped);
             self::assertSame('delayed-payload', $popped->getJobData());
+        });
+    }
+
+    public function testDelayedReliableJobCanBeConfirmed(): void
+    {
+        $this->withDriver(function (RabbitMQ $driver): void {
+            $job = $this->newJob('delayed-reliable-payload');
+            $job->setDelayTime(1);
+            $job->setRetryTimes(2);
+
+            self::assertTrue($driver->push($job));
+            self::assertSame(['runningQueue' => 0, 'delayQueue' => 1], $driver->info());
+            self::assertNull($driver->pop(0.05));
+
+            $popped = $driver->pop(2.0);
+            self::assertInstanceOf(Job::class, $popped);
+            self::assertSame('delayed-reliable-payload', $popped->getJobData());
+            self::assertTrue($driver->confirm($popped));
+            self::assertSame(['runningQueue' => 0, 'delayQueue' => 0], $driver->info());
         });
     }
 
@@ -150,6 +163,55 @@ final class RabbitMQDriverTest extends TestCase
             }
             self::assertInstanceOf(Job::class, $driver->pop(1.0));
         }, 20, 32);
+    }
+
+    public function testReliableDeliveryLimitKeepsTheNextJobOnTheBroker(): void
+    {
+        $this->withDriver(function (RabbitMQ $driver): void {
+            $first = $this->newJob('first');
+            $first->setRetryTimes(2);
+            $second = $this->newJob('second');
+            $second->setRetryTimes(2);
+
+            self::assertTrue($driver->push($first));
+            self::assertTrue($driver->push($second));
+            $delivery = $driver->pop(1.0);
+            self::assertInstanceOf(Job::class, $delivery);
+            self::assertSame('first', $delivery->getJobData());
+            self::assertNull($driver->pop(0.05));
+            self::assertSame(1, $driver->info()['runningQueue']);
+
+            self::assertTrue($driver->confirm($delivery));
+            $delivery = $driver->pop(1.0);
+            self::assertInstanceOf(Job::class, $delivery);
+            self::assertSame('second', $delivery->getJobData());
+            self::assertTrue($driver->confirm($delivery));
+        }, 1);
+    }
+
+    public function testBufferedJobKeepsItsRetryBudgetUntilPop(): void
+    {
+        $this->withDriver(function (RabbitMQ $driver): void {
+            // 启动后台协程，随后让可信任务在本地缓冲区等待。
+            self::assertNull($driver->pop(0.05));
+            $job = $this->newJob('buffered');
+            $job->setRetryTimes(1);
+            $job->setWaitConfirmTime(1);
+            self::assertTrue($driver->push($job));
+
+            $deadline = microtime(true) + 1.0;
+            while ($driver->info()['runningQueue'] !== 0 && microtime(true) < $deadline) {
+                Coroutine::sleep(0.01);
+            }
+            self::assertSame(0, $driver->info()['runningQueue']);
+            Coroutine::sleep(1.2);
+
+            $delivery = $driver->pop(1.0);
+            self::assertInstanceOf(Job::class, $delivery);
+            self::assertSame(1, $delivery->getRunTimes());
+            self::assertTrue($driver->confirm($delivery));
+            self::assertNull($driver->pop(0.05));
+        });
     }
 
     private function withDriver(callable $test, int $prefetchCount = 100, int $bufferSize = 1000): void

@@ -10,7 +10,7 @@ composer require easyswoole/queue
 
 运行环境要求：
 
-- PHP 8.0+
+- PHP 8.1+
 - Swoole 5.1+
 - phpredis 扩展
 - 协程环境
@@ -91,25 +91,13 @@ Cluster 模式下，同一个 topic 使用的所有 Redis key 都带有相同的
 | `context` | `[]` | ✓ | ✓ | TLS/SSL 等流上下文参数 |
 | `reservationTimeout` | `30` | ✓ | ✓ | 可信任务刚领取时的兜底可见性超时 |
 | `migrationBatchSize` | `100` | ✓ | ✓ | 单次迁移到期任务的最大数量 |
-| `popPollInterval` | `0.05` | ✓ | ✓ | 空队列短轮询间隔，单位为秒 |
+| `popPollInterval` | `0.05` | ✓ | ✓ | 后台消费空闲时的轮询间隔，单位为秒 |
 
 连接池还可以使用 `minObjectNum`、`maxObjectNum`、`getObjectTimeout` 等 `EasySwoole\Pool\Config` 配置项。
 
 ## RabbitMQ 配置
 
-RabbitMQ 驱动基于 `php-amqplib/php-amqplib`。该客户端内部使用 `stream_select()`，
-因此必须在协程启动前同时开启 TCP Hook 和 Stream Hook：
-
-```php
-use Swoole\Coroutine;
-
-Coroutine::set([
-    'hook_flags' => SWOOLE_HOOK_TCP | SWOOLE_HOOK_STREAM_FUNCTION,
-]);
-```
-
-在提供 `SWOOLE_HOOK_STREAM_SELECT` 常量的 Swoole 版本中，它与
-`SWOOLE_HOOK_STREAM_FUNCTION` 表示相同的 Stream Hook。
+RabbitMQ 驱动基于 `easyswoole/amqp`，网络 I/O 使用 Swoole 协程 Socket。在 Swoole 协程内调用驱动即可。
 
 ```php
 use EasySwoole\Queue\Driver\RabbitMQ\Config;
@@ -140,21 +128,20 @@ $queue = new Queue(new RabbitMQ($config));
 | `virtualHost` | `/` | Virtual host |
 | `connectTimeout` | `3.0` | 连接超时，单位为秒 |
 | `readWriteTimeout` | `3.0` | 网络读写超时，单位为秒 |
-| `keepalive` | `false` | 是否开启 TCP keepalive |
 | `heartbeat` | `0` | AMQP 心跳间隔；0 表示关闭 |
-| `context` | `[]` | TLS 等流上下文参数 |
-| `popPollInterval` | `0.05` | 空队列短轮询间隔，单位为秒 |
+| `tls` | `null` | TLS 配置，使用 `setTls(new \EasySwoole\AMQP\TlsConfig(...))` |
+| `popPollInterval` | `0.05` | 后台消费空闲时的轮询间隔，单位为秒 |
 | `queuePrefix` | `easyswoole.queue.` | RabbitMQ 队列名称前缀 |
-| `prefetchCount` | `100` | 单个消费连接允许同时处理中、尚未确认的可信任务数 |
+| `prefetchCount` | `100` | 消费后台协程持有的未确认可信任务上限，包含本地缓冲区中的可信任务 |
 | `consumerBufferSize` | `1000` | Broker 消息进入 `pop()` 前的本地协程缓冲区容量 |
 
-RabbitMQ 驱动使用一个独立的后台消费长连接，通过 `basic_consume` 接收消息，并把任务分发到本地协程缓冲区。普通任务进入本地缓冲区后立即 ACK，可信任务则等待业务调用 `confirm()`。ACK、确认超时和重投都由拥有原 Channel 的后台协程统一执行，因此每条可信任务不会单独占用连接；同一进程内同时处理的可信任务数量主要由 `prefetchCount` 控制。
+RabbitMQ 驱动使用一个独立的后台消费长连接，通过手动确认模式的 `basic.get` 领取消息，并把任务分发到本地协程缓冲区。普通任务进入本地缓冲区后立即 ACK，可信任务则等待业务调用 `confirm()`。 可信任务的确认期限从 `pop()` 把任务交给业务时开始计算。ACK、确认超时和重投都由拥有原 Channel 的后台协程统一执行，因此每条可信任务不会单独占用连接；同一进程内同时处理的可信任务数量主要由 `prefetchCount` 控制。
 
 发布和消费分别使用连接池：发布池隔离多个业务协程的并发写入，消费池固定为 `minObjectNum=1`、`maxObjectNum=1`，其长连接不占用发布池配额。可信任务确认超时后，驱动会先用 Publisher Confirm 发布带有最新 `runTimes` 的任务，再 ACK 原消息。进程或连接在确认前异常中断时，RabbitMQ 会重新投递尚未 ACK 的原消息；业务仍需保持幂等。
 
-可信任务场景建议从默认的 `prefetchCount=100` 开始调优。该值过大会让消费协程连续接收过多未确认消息，增加业务协程提交 `confirm()` 的等待时间；应根据单进程实际并发任务数和处理耗时逐步调整。
+可信任务场景可根据单进程实际并发任务数和处理耗时调整 `prefetchCount`。达到上限时，后台协程暂停领取可信任务，直到已有任务确认或超时。
 
-生产环境建议启用非零 `heartbeat`，让连接池健康检查能够发现静默断线和 TCP 半开连接。`php-amqplib` 要求 `readWriteTimeout` 至少为 heartbeat 的两倍，例如：
+生产环境可启用非零 `heartbeat`。AMQP 客户端会发送协商后的心跳，连接池也会对闲置连接执行 AMQP 往返探活。
 
 ```php
 $config->setHeartbeat(10);
@@ -353,35 +340,29 @@ composer test
 - `waitConfirmTime` 内不会重复领取，超时后重新投递。
 - 延迟任务到期前不可见、到期后可消费。
 
-## 性能与可靠性基准
+## RabbitMQ 性能与可靠性测试
 
-以下结果于 2026-10-11 在一台阿里云 2 核 2GB 实例上测得。Redis、RabbitMQ、PHP 客户端和压测程序均运行在同一台实例，通过 `127.0.0.1` 通信，因此结果主要反映队列驱动及服务端处理能力，不包含公网延迟。
+测试环境为 Apple M2、RabbitMQ 4.4.1、PHP 8.4.27、Swoole 6.2.4 和 `easyswoole/amqp` 1.0.1。客户端通过本机 TCP 连接 Broker，使用持久化队列和持久化消息，发布开启 Publisher Confirm。
 
-测试环境和口径：
+每组测 3 轮，每轮 4,000 条任务，业务数据为 1 KiB。表中为吞吐中位数，单位为条/秒。预填后消费只计领取和确认阶段，端到端场景同时启动表中数量的生产和消费协程。可信任务领取后立即确认，测试未加入业务处理耗时。
 
-- 2 vCPU，实例标称 2GB 内存，操作系统可见约 1.6GiB。
-- PHP 8.4.26、Swoole 6.2.2。
-- Redis 6.2.22，单机模式，RDB 开启、AOF 关闭。
-- RabbitMQ 4.3.6，持久化队列和持久化消息，Publisher Confirm 开启。
-- 发布连接池最大连接数为 20，同时使用 20 个发布协程和 20 个消费协程；RabbitMQ 另有一个固定 `1/1` 的消费连接池。
-- RabbitMQ 使用 `heartbeat=10`、`readWriteTimeout=25`、`prefetchCount=100`。
-- 每个 Job 的 `jobData` 为 256 字节；每种驱动和任务模式每轮处理 20,000 条任务，连续执行三轮，表中为三轮中位数。
+| 任务模式 | 协程数 | 仅入队 | 预填后消费 | 端到端 |
+| --- | ---: | ---: | ---: | ---: |
+| 可信任务 | 1 | 6,607 | 8,522 | 5,266 |
+| 可信任务 | 4 | 15,072 | 8,401 | 5,777 |
+| 可信任务 | 16 | 25,853 | 8,125 | 6,334 |
+| 普通任务 | 1 | 6,513 | 8,809 | 5,435 |
+| 普通任务 | 4 | 14,987 | 8,739 | 6,250 |
+| 普通任务 | 16 | 26,521 | 8,665 | 6,656 |
 
-| 驱动 | 任务模式 | Push | Pop / Confirm |
-| --- | --- | ---: | ---: |
-| Redis | 普通任务 | 13,484 条/秒 | 9,257 条/秒 |
-| Redis | 可信任务 | 13,511 条/秒 | 3,812 条/秒 |
-| RabbitMQ | 普通任务 | 1,779 条/秒 | 4,417 条/秒 |
-| RabbitMQ | 可信任务 | 1,764 条/秒 | 3,654 条/秒 |
+同一 topic 由一个后台协程串行执行 `basic.get`。本次测试中，增加消费协程没有提升预填队列的消费吞吐。
 
-可靠性检查结果：
+可靠性验证结果如下。
 
-- 共处理 240,000 条任务，其中可信任务 120,000 条；每轮均为 20,000 个唯一 Job、0 个重复、0 个错误，消费完成后队列数量为 0。
-- 100 条 RabbitMQ 可信任务同时确认超时后全部重新投递，`runTimes` 均由 1 变为 2，重新确认后队列为空。
-- 强制断开 RabbitMQ 消费连接后，旧回执全部确认失败；驱动自动重建消费连接，300 条任务全部恢复，测试中没有丢失或重复。
-- 在 10,000 次并发发布期间由服务端关闭 21 个 RabbitMQ 连接，19 个在途 Publisher Confirm 明确抛出连接关闭异常，其余 9,981 条成功；连接池重建后追加 100 条全部成功，Broker 最终计数准确为 10,081，没有静默丢失。
-
-这些数据用于展示上述固定环境下的参考性能，不代表不同硬件、持久化策略、消息大小和业务处理逻辑下的保证值。可信队列采用“至少投递一次”语义；网络在确认临界点中断时，调用方重试仍可能产生重复，因此业务处理必须保持幂等。
+- 100 条可信任务集中超时后，全部重新投递并成功确认，旧回执均被拒绝。
+- Broker 强制断开连接后，未确认任务成功恢复，旧回执无法确认新投递，断线后的 `flush()` 正常执行。
+- 可信任务在本地缓冲区等待超过确认期限后，首次 `pop()` 仍可正常领取并确认。确认期限从实际交付给业务时开始计算。
+- 完整测试通过 19 项、209 个断言。启用心跳后，RabbitMQ 专项测试通过 9 项、111 个断言。
 
 ## 自定义驱动
 

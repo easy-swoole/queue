@@ -21,12 +21,12 @@
         }
     },
     "require": {
-        "php": ">=8.0",
+        "php": ">=8.1",
         "ext-swoole": ">=5.1",
         "ext-redis": "*",
         "easyswoole/utility": "^1.4",
         "easyswoole/pool": "^3.0",
-        "php-amqplib/php-amqplib": "^3.7"
+        "easyswoole/amqp": "^1.0.1"
     },
     "require-dev": {
         "easyswoole/swoole-ide-helper": "^1.0",

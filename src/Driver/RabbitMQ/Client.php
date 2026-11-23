@@ -2,62 +2,53 @@
 
 namespace EasySwoole\Queue\Driver\RabbitMQ;
 
+use EasySwoole\AMQP\AMQP;
+use EasySwoole\AMQP\Channel;
+use EasySwoole\AMQP\Config as AmqpConfig;
 use EasySwoole\Pool\ObjectInterface;
-use PhpAmqpLib\Channel\AMQPChannel;
-use PhpAmqpLib\Connection\AMQPStreamConnection;
 
 /** RabbitMQ 连接对象，每个连接分别维护发布和消费 Channel。 */
 class Client implements ObjectInterface
 {
-    private AMQPStreamConnection $connection;
-    private AMQPChannel $publishChannel;
-    private AMQPChannel $consumeChannel;
+    private AMQP $connection;
+    private Channel $publishChannel;
+    private ?Channel $consumeChannel = null;
+    private float $lastUsedAt;
     private array $declaredTopics = [];
-    private int $heartbeat;
 
-    public function __construct(Config $config)
+    public function __construct(private Config $config)
     {
-        $this->heartbeat = $config->getHeartbeat();
-        $this->connection = new AMQPStreamConnection(
-            $config->getHost(),
-            $config->getPort(),
-            $config->getUsername(),
-            $config->getPassword(),
-            $config->getVirtualHost(),
-            false,
-            'AMQPLAIN',
-            null,
-            'en_US',
-            $config->getConnectTimeout(),
-            $config->getReadWriteTimeout(),
-            $config->getContext() === [] ? null : $config->getContext(),
-            $config->isKeepalive(),
-            $config->getHeartbeat()
-        );
+        $this->connection = new AMQP(new AmqpConfig(
+            host: $config->getHost(),
+            port: $config->getPort(),
+            user: $config->getUsername(),
+            password: $config->getPassword(),
+            vhost: $config->getVirtualHost(),
+            connectTimeout: $config->getConnectTimeout(),
+            readTimeout: $config->getReadWriteTimeout(),
+            writeTimeout: $config->getReadWriteTimeout(),
+            heartbeat: $config->getHeartbeat(),
+            tls: $config->getTls(),
+        ));
 
-        $this->publishChannel = $this->connection->channel();
-        // Publisher Confirm 用于确认消息已经被 RabbitMQ Broker 接收。
-        $this->publishChannel->confirm_select();
-        $this->consumeChannel = $this->connection->channel();
+        try {
+            $this->connection->connect();
+            $this->publishChannel = $this->connection->channel();
+            $this->lastUsedAt = microtime(true);
+        } catch (\Throwable $error) {
+            $this->gc();
+            throw $error;
+        }
     }
 
-    public function publishChannel(): AMQPChannel
+    public function publishChannel(): Channel
     {
         return $this->publishChannel;
     }
 
-    public function consumeChannel(): AMQPChannel
+    public function consumeChannel(): Channel
     {
-        return $this->consumeChannel;
-    }
-
-    /** 超时重投使用事务 Channel 后，重建消费 Channel，避免后续 ACK 滞留在事务中。 */
-    public function resetConsumeChannel(): void
-    {
-        if ($this->consumeChannel->is_open()) {
-            $this->consumeChannel->close();
-        }
-        $this->consumeChannel = $this->connection->channel();
+        return $this->consumeChannel ??= $this->connection->channel();
     }
 
     public function hasDeclaredTopic(string $topic, int $generation): bool
@@ -73,27 +64,14 @@ class Client implements ObjectInterface
     public function gc(): void
     {
         try {
-            if (isset($this->publishChannel) && $this->publishChannel->is_open()) {
-                $this->publishChannel->close();
-            }
-        } catch (\Throwable) {
-        }
-        try {
-            if (isset($this->consumeChannel) && $this->consumeChannel->is_open()) {
-                $this->consumeChannel->close();
-            }
-        } catch (\Throwable) {
-        }
-        try {
-            if (isset($this->connection) && $this->connection->isConnected()) {
-                $this->connection->close();
-            }
+            $this->connection->close();
         } catch (\Throwable) {
         }
     }
 
     public function objectRestore(): void
     {
+        $this->lastUsedAt = microtime(true);
     }
 
     public function beforeUse(): bool
@@ -108,28 +86,20 @@ class Client implements ObjectInterface
 
     private function isHealthy(): bool
     {
-        try {
-            if (!$this->connection->isConnected()
-                || !$this->publishChannel->is_open()
-                || !$this->consumeChannel->is_open()
-            ) {
-                return false;
-            }
-
-            if ($this->heartbeat > 0
-                && microtime(true) - $this->connection->getLastActivity() >= $this->heartbeat
-            ) {
-                // 仅对达到心跳周期的闲置连接执行真实 AMQP 往返；它会处理已经到达的
-                // heartbeat/关闭帧，同时避免给持续活跃的连接增加逐次借用开销。
-                $this->publishChannel->basic_qos(null, 0, false);
-            }
-
-            // heartbeat 开启时会检查 Broker 活跃时间并按需发送心跳；
-            // 检查失败抛出的异常会使连接被 Pool 淘汰。
-            $this->connection->checkHeartBeat();
-            return true;
-        } catch (\Throwable) {
+        if (!$this->connection->isConnected()) {
             return false;
         }
+
+        $heartbeat = $this->config->getHeartbeat();
+        if ($heartbeat > 0 && microtime(true) - $this->lastUsedAt >= $heartbeat) {
+            try {
+                $this->publishChannel->qos(0);
+                $this->lastUsedAt = microtime(true);
+            } catch (\Throwable) {
+                return false;
+            }
+        }
+
+        return true;
     }
 }

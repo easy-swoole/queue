@@ -2,6 +2,7 @@
 
 namespace EasySwoole\Queue\Driver\RabbitMQ;
 
+use EasySwoole\AMQP\TlsConfig;
 use EasySwoole\Pool\Exception\Exception;
 
 /** RabbitMQ 连接、连接池和队列行为配置。 */
@@ -17,9 +18,8 @@ class Config extends \EasySwoole\Pool\Config
     protected string $virtualHost = '/';
     protected float $connectTimeout = 3.0;
     protected float $readWriteTimeout = 3.0;
-    protected bool $keepalive = false;
     protected int $heartbeat = 0;
-    protected array $context = [];
+    protected ?TlsConfig $tls = null;
     protected float $popPollInterval = 0.05;
     protected string $queuePrefix = 'easyswoole.queue.';
     /** 单个消费 Channel 允许同时存在的未确认可信任务数。 */
@@ -101,30 +101,22 @@ class Config extends \EasySwoole\Pool\Config
         return $this;
     }
 
-    public function isKeepalive(): bool { return $this->keepalive; }
-
-    public function setKeepalive(bool $keepalive): self
-    {
-        $this->keepalive = $keepalive;
-        return $this;
-    }
-
     public function getHeartbeat(): int { return $this->heartbeat; }
 
     public function setHeartbeat(int $heartbeat): self
     {
-        if ($heartbeat < 0) {
-            throw new Exception('rabbitmq heartbeat cannot be negative');
+        if ($heartbeat < 0 || $heartbeat > 65535) {
+            throw new Exception('rabbitmq heartbeat must be between 0 and 65535');
         }
         $this->heartbeat = $heartbeat;
         return $this;
     }
 
-    public function getContext(): array { return $this->context; }
+    public function getTls(): ?TlsConfig { return $this->tls; }
 
-    public function setContext(array $context): self
+    public function setTls(?TlsConfig $tls): self
     {
-        $this->context = $context;
+        $this->tls = $tls;
         return $this;
     }
 

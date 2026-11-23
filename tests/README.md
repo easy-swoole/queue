@@ -29,8 +29,7 @@ composer test
 
 ## RabbitMQ 驱动测试
 
-RabbitMQ 测试依赖 `php-amqplib` 的 `stream_select()`，运行协程前需要开启
-`SWOOLE_HOOK_TCP | SWOOLE_HOOK_STREAM_FUNCTION`。测试用例已自动设置这两个 Hook。
+RabbitMQ 测试会连接实际 Broker，并通过 `easyswoole/amqp` 的协程 Socket 发送和接收消息。每个用例使用独立 topic，结束后自动清理。
 
 ```bash
 export RABBITMQ_HOST=127.0.0.1
@@ -42,7 +41,7 @@ export RABBITMQ_POOL_MIN=1
 export RABBITMQ_POOL_MAX=5
 export RABBITMQ_PREFETCH_COUNT=100
 export RABBITMQ_CONSUMER_BUFFER_SIZE=1000
-composer test
+vendor/bin/phpunit tests/RabbitMQDriverTest.php
 ```
 
 可选变量：`RABBITMQ_CONNECT_TIMEOUT`、`RABBITMQ_READ_WRITE_TIMEOUT`、
